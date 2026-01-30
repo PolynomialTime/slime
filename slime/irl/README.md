@@ -20,30 +20,30 @@ Key features:
 ### Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│ Bi-Level Optimization for LLM + IRL                  │
-├──────────────────────────────────────────────────────┤
-│                                                      │
+┌─────────────────────────────────────────────────────┐
+│ Bi-Level Optimization for LLM + IRL                 │
+├─────────────────────────────────────────────────────┤
+│                                                     │
 │  ┌─────────────────────────────────────────────┐    │
 │  │ LEVEL 1: LLM Policy Update (PPO)            │    │
 │  │ ├─ Generate: Sample LLM sequences           │    │
 │  │ ├─ Last Hidden: Extract final token state   │    │
-│  │ ├─ Reward: R(τ) = Reward_Model(last_hidden)│    │
+│  │ ├─ Reward: R(τ) = Reward_Model(last_hidden) │    │
 │  │ ├─ Advantage: Compute A_t via critic        │    │
 │  │ └─ Update: PPO loss on policy               │    │
 │  └─────────────────────────────────────────────┘    │
-│                  ↕                                   │
+│                  ↕                                  │
 │                (alternate)                          │
-│                  ↕                                   │
+│                  ↕                                  │
 │  ┌─────────────────────────────────────────────┐    │
 │  │ LEVEL 2: Reward Model Update (IRL)          │    │
 │  │ ├─ Expert: Load expert LLM sequences        │    │
 │  │ ├─ Policy: Policy-generated sequences       │    │
-│  │ ├─ Loss: -E[R(τ_expert)] + E[R(τ_policy)]  │    │
+│  │ ├─ Loss: -E[R(τ_expert)] + E[R(τ_policy)]   v.    │    │
 │  │ └─ Update: Gradient descent on reward model │    │
 │  └─────────────────────────────────────────────┘    │
-│                                                      │
-└──────────────────────────────────────────────────────┘
+│                                                     │
+└─────────────────────────────────────────────────────┘
 ```
 
 ## Components
@@ -95,9 +95,10 @@ Where:
 - Orchestrates IRL training steps
 
 **SGLang Integration**:
-- Method: `generate_rollouts_with_sglang(sglang_runtime, prompts, ...)`
-- Features: Batch generation, hidden state extraction, efficient serving
-- Returns: Rollout dictionary with hidden states, logits, log probabilities
+- Method: `generate_rollouts_with_sglang(args, prompts, data_source=None)`
+- Uses SLIME's high-level `generate_rollout()` API from `slime.rollout.sglang_rollout`
+- Features: Batch generation, reward evaluation, efficient serving, automatic metrics collection
+- Returns: Rollout dictionary with samples, completions, rewards, log probabilities, and metrics
 
 **Class: `BiLevelTrainingLoop`**
 - Helper for integrating into standard training loops
@@ -105,12 +106,7 @@ Where:
 
 ## SGLang Integration
 
-SGLang provides high-performance LLM inference with:
-- **Prefix caching**: Reuse cached prompts across generations
-- **Batch inference**: Efficient processing of variable-length sequences  
-- **GPU kernels**: Optimized attention and sampling operations
-
-### Setup SGLang
+SGLang is integrated through SLIME's rollout manager. Configuration is done via args rather than direct runtime initialization:
 
 ```bash
 # Install SGLang
@@ -122,23 +118,46 @@ cd sglang
 pip install -e .
 ```
 
-### Initialize SGLang Runtime
+### SGLang Configuration in Args
 
 ```python
-import sglang as sgl
+from argparse import Namespace
 
-# Single GPU
-runtime = sgl.Runtime(
-    model_path="meta-llama/Llama-2-7b-hf",
-    tp_size=1,           # Tensor parallelism
-    max_total_tokens=4096,
-)
-
-# Multi-GPU (tensor parallelism)
-runtime = sgl.Runtime(
-    model_path="meta-llama/Llama-2-70b-hf",
-    tp_size=4,           # 4-way tensor parallelism
-    max_total_tokens=4096,
+args = Namespace(
+    # Model configuration
+    hf_checkpoint="meta-llama/Llama-2-7b-hf",
+    
+    # SGLang server
+    sglang_router_ip="localhost",
+    sglang_router_port=30000,
+    sglang_server_concurrency=64,
+    
+    # Rollout configuration
+    rollout_num_gpus=1,
+    rollout_num_gpus_per_engine=1,
+    sglang_dp_size=None,
+    
+    # Generation parameters
+    rollout_temperature=1.0,
+    rollout_top_p=0.9,
+    rollout_top_k=0,
+    rollout_max_response_len=128,
+    rollout_stop=[],
+    rollout_stop_token_ids=[],
+    
+    # Batch configuration
+    rollout_batch_size=32,
+    over_sampling_batch_size=32,
+    n_samples_per_prompt=1,
+    
+    # Data configuration
+    rollout_global_dataset=True,
+    group_rm=False,
+    partial_rollout=False,
+    
+    # Misc
+    rollout_seed=42,
+    apply_chat_template=False,
 )
 ```
 
@@ -196,37 +215,33 @@ bi_level_optimizer = setup_bi_level_irl(
 )
 ```
 
-### Step 3: Integrate with SGLang for LLM Generation
+### Step 3: Generate LLM Rollouts with SGLang
 
 ```python
-import sglang as sgl
-from slime.irl.example_integration import generate_rollouts_with_sglang
+from slime.irl.example_integration import generate_rollouts_with_sglang_api
 
-# Initialize SGLang runtime
-runtime = sgl.Runtime(
-    model_path="meta-llama/Llama-2-7b-hf",
-    tp_size=1,
-)
-
-# Generate LLM rollouts with SGLang
+# Prepare prompts for generation
 prompts = [
     "Summarize: The quick brown fox...",
     "Translate to French: Hello world",
 ]
 
-rollout_data = generate_rollouts_with_sglang(
+# Generate LLM rollouts with reward evaluation
+rollout_data = generate_rollouts_with_sglang_api(
     bi_level_optimizer=bi_level_optimizer,
-    sglang_runtime=runtime,
+    args=args,  # Configuration namespace
     prompts=prompts,
-    max_new_tokens=128,
-    temperature=1.0,
-    top_p=0.9,
+    data_source=None,  # Optional data source for rollout management
 )
-# Returns: {
-#   "completions": [...],
-#   "hidden_states": [batch, seq_len, hidden_size],
-#   "log_probs": [batch, seq_len],
-#   "logits": [batch, seq_len, vocab_size],
+
+# Returns:
+# {
+#   "samples": [Sample(...), ...],         # Full Sample objects with metadata
+#   "completions": [...],                  # Generated text completions
+#   "rewards": torch.Tensor([...]),        # Rewards from trainable model
+#   "log_probs": torch.Tensor([...]),      # Log probabilities from generation
+#   "prompts": ["...", ...],               # Original prompts
+#   "metrics": {...}                       # Generation metrics
 # }
 ```
 
@@ -235,60 +250,76 @@ rollout_data = generate_rollouts_with_sglang(
 In your main training loop (similar to `train.py`):
 
 ```python
-from slime.irl.example_integration import integrate_with_rollout, generate_rollouts_with_sglang
+from slime.irl.example_integration import generate_rollouts_with_sglang_api
+from slime.irl import BiLevelOptimizer
 
 for rollout_id in range(args.num_rollout):
-    # 1. Generate LLM sequences with SGLang (instead of fixed rollout_manager)
+    # 1. Prepare batch of prompts for this rollout
     prompts = prepare_prompts_for_batch(rollout_id)
-    rollout_data = generate_rollouts_with_sglang(
-        bi_level_optimizer,
-        sglang_runtime,
-        prompts,
-        max_new_tokens=128,
-        temperature=1.0,
-    )
     
-    # 2. Extract final token hidden states from LLM generation
-    hidden_states = rollout_data["hidden_states"]  # [batch, seq_len, hidden_size]
-    final_hidden = hidden_states[:, -1, :]         # [batch, hidden_size]
-    
-    # 3. Compute sequence-level rewards from trainable model
-    rollout_data = integrate_with_rollout(
-        bi_level_optimizer,
-        rollout_data,
-        hidden_states=final_hidden,
+    # 2. Generate LLM sequences with SGLang and evaluate rewards
+    # This uses SLIME's high-level rollout API
+    rollout_data = generate_rollouts_with_sglang_api(
+        bi_level_optimizer=bi_level_optimizer,
+        args=args,
+        prompts=prompts,
+        data_source=None,
     )
-    # Now rollout_data["rewards"] = trainable model outputs (not fixed)
+    # Rewards are already computed by trainable reward model!
+    # rollout_data["rewards"] = trainable model outputs [batch]
+    # rollout_data["samples"] = Sample objects with metadata
+    
+    # 3. Extract samples for training (optional - already in rollout_data)
+    samples = rollout_data["samples"]
     
     # 4. Train policy via PPO (standard SLIME with trainable rewards)
+    # Pass rollout_data to policy training (includes rewards from step 2)
     critic_model.async_train(rollout_id, rollout_data)
     actor_model.async_train(rollout_id, rollout_data)
     
     # 5. Update reward model via IRL (bi-level alternation)
+    # Check if it's time to update the reward model
     should_update_reward = bi_level_optimizer.step()
     if should_update_reward:
+        # Train reward model using IRL objective
         metrics = bi_level_optimizer.update_reward_model(
-            policy_rollouts=rollout_data,
+            policy_rollouts=samples,  # Can be Sample objects or dict
             num_epochs=args.irl_num_epochs,
         )
         logger.info(f"Reward IRL metrics: {metrics}")
+        logger.info(f"  Expert loss: {metrics['expert_loss']:.4f}")
+        logger.info(f"  Policy loss: {metrics['policy_loss']:.4f}")
 
-runtime.shutdown()  # Clean up SGLang
+logger.info("Training completed!")
 ```
 
 ## Key Parameters
 
-### SGLang Configuration
+### SGLang Configuration (via Args)
+
 ```python
-# Runtime initialization
-tp_size = 1                    # Tensor parallelism degree
-pp_size = 1                    # Pipeline parallelism degree
-max_total_tokens = 4096        # Max tokens in memory
+# Server configuration
+sglang_router_ip = "localhost"
+sglang_router_port = 30000
+sglang_server_concurrency = 64      # Concurrent requests
+sglang_dp_size = None               # Data parallelism (optional)
+
+# GPU configuration
+rollout_num_gpus = 1                # GPUs for rollout
+rollout_num_gpus_per_engine = 1     # GPUs per engine
 
 # Generation settings
-max_new_tokens = 128           # Tokens to generate per prompt
-temperature = 1.0              # Sampling temperature
-top_p = 0.9                    # Nucleus sampling parameter
+rollout_temperature = 1.0            # Sampling temperature
+rollout_top_p = 0.9                  # Nucleus sampling parameter
+rollout_top_k = 0                    # Top-k sampling (0 = disabled)
+rollout_max_response_len = 128       # Max tokens to generate
+rollout_stop = []                    # Stop tokens (e.g., ["\n"])
+rollout_stop_token_ids = []          # Stop token IDs
+
+# Batch configuration
+rollout_batch_size = 32              # Batch size for training
+over_sampling_batch_size = 32        # Oversampling batch size
+n_samples_per_prompt = 1             # Samples per prompt
 ```
 
 ### Reward Model Configuration (for LLMs)
@@ -370,51 +401,74 @@ Train an LLM to match expert text generation (e.g., summarization, translation) 
 
 ## Advanced Features
 
-### Using Mean Pooling Instead of Last Token
+### Customizing Reward Computation
 
-If you want to use average hidden states instead of just the last token:
+The bi-level optimizer has a built-in `_compute_reward_for_sample()` method that handles reward computation. You can override it for custom reward logic:
 
 ```python
-# In integrate_with_rollout
-hidden_states = rollout_data["hidden_states"]  # [batch, seq_len, hidden_size]
-aggregated_hidden = hidden_states.mean(dim=1)  # [batch, hidden_size]
+class CustomBiLevelOptimizer(BiLevelOptimizer):
+    def _compute_reward_for_sample(self, sample: Sample) -> float:
+        """Custom reward computation for samples."""
+        # Example: Use response length + semantic scoring
+        response_quality = len(sample.response) / 100.0
+        # You could integrate external scoring here
+        reward = response_quality
+        return float(reward)
+```
 
-rollout_data = integrate_with_rollout(
-    bi_level_optimizer,
-    rollout_data,
-    hidden_states=aggregated_hidden,
+### Working with Sample Objects
+
+The new implementation uses `Sample` objects from the SLIME framework, which contain metadata:
+
+```python
+from slime.utils.types import Sample
+
+# Access sample properties
+for sample in rollout_data["samples"]:
+    print(f"Prompt: {sample.prompt}")
+    print(f"Response: {sample.response}")
+    print(f"Reward: {sample.reward}")
+    print(f"Log probs: {sample.rollout_log_probs}")
+    print(f"Status: {sample.status}")
+```
+
+### Custom Expert Data Loading
+
+If you have expert data in a custom format, convert it to Sample objects:
+
+```python
+from slime.utils.types import Sample
+
+expert_samples = []
+for expert_response, score in your_expert_data:
+    sample = Sample(
+        prompt="Your expert prompt",
+        response=expert_response,
+        reward=score,  # Scalar reward
+        tokens=[...],  # Tokenized response
+    )
+    expert_samples.append(sample)
+
+expert_dataloader = DataLoader(
+    ExpertDataset(expert_samples),
+    batch_size=32,
 )
 ```
 
 ### Custom IRL Objectives
 
-To implement a different IRL objective (e.g., AIRL, GAIL):
+To implement a different IRL objective (e.g., AIRL, GAIL), modify `MaxEntropyIRLObjective`:
 
 ```python
-from slime.irl.irl_trainer import IRLTrainer
+from slime.irl.irl_trainer import MaxEntropyIRLObjective
 
-class CustomIRLObjective:
-    def compute_loss(self, expert_traj, policy_traj):
+class CustomIRLObjective(MaxEntropyIRLObjective):
+    def compute_loss(self, expert_trajectories, policy_trajectories):
         # Your custom loss computation
+        loss = self.your_custom_loss(expert_trajectories, policy_trajectories)
+        metrics = {"custom_loss": loss.item()}
         return loss, metrics
-
-# Register in IRLTrainer.__init__
-if irl_objective == "custom":
-    self.objective = CustomIRLObjective(...)
 ```
-
-### Multi-Reward Heads
-
-For learning multiple reward signals:
-
-```python
-class MultiRewardModel(nn.Module):
-    def __init__(self, input_size, num_rewards=3):
-        super().__init__()
-        self.mlp = nn.Sequential(...)
-        self.reward_heads = nn.ModuleList([
-            nn.Linear(hidden_size, 1) for _ in range(num_rewards)
-        ])
     
     def forward(self, features):
         hidden = self.mlp(features)

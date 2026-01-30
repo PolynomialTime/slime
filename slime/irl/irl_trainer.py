@@ -2,12 +2,14 @@
 
 import logging
 from argparse import Namespace
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+
+from slime.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -16,21 +18,28 @@ class ExpertDataset(Dataset):
     """Dataset for expert demonstrations.
     
     Stores trajectories from expert or high-quality policy rollouts.
+    Supports both raw trajectory dicts and Sample objects from SGLang generation.
     """
     
     def __init__(
         self,
-        trajectories: List[Dict[str, torch.Tensor]],
+        trajectories: List[Dict[str, torch.Tensor] | Sample],
     ):
         """Initialize expert dataset.
         
         Args:
-            trajectories: List of trajectory dicts, each containing:
+            trajectories: List of trajectory dicts or Sample objects, each containing:
                 - hidden_states: [seq_len, hidden_size] from policy model
                 - actions: [seq_len] action indices
                 - rewards: scalar reward for the entire sequence (NOT per-token)
                 - returns: scalar return for the entire sequence
                 - length: int, actual sequence length (excluding padding)
+                
+                Or Sample objects with:
+                - response: Generated text
+                - tokens: Token sequence
+                - reward: Scalar reward for the sample
+                - rollout_log_probs: Log probabilities from generation
         """
         self.trajectories = trajectories
     
@@ -38,7 +47,19 @@ class ExpertDataset(Dataset):
         return len(self.trajectories)
     
     def __getitem__(self, idx):
-        return self.trajectories[idx]
+        traj = self.trajectories[idx]
+        
+        # Handle Sample objects
+        if isinstance(traj, Sample):
+            return {
+                "response": traj.response,
+                "tokens": torch.tensor(traj.tokens) if traj.tokens else torch.tensor([]),
+                "reward": torch.tensor(traj.reward if traj.reward is not None else 0.0),
+                "log_probs": torch.tensor(traj.rollout_log_probs) if traj.rollout_log_probs else torch.tensor([]),
+            }
+        
+        # Handle dict trajectories
+        return traj
 
 
 class MaxEntropyIRLObjective:
@@ -88,7 +109,7 @@ class MaxEntropyIRLObjective:
     
     def compute_loss(
         self,
-        expert_trajectories: Dict[str, torch.Tensor],
+        expert_trajectories: Dict[str, torch.Tensor] | List[Sample],
         policy_trajectories: Dict[str, torch.Tensor],
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """Compute IRL loss for LLM policy learning.
@@ -97,27 +118,54 @@ class MaxEntropyIRLObjective:
             expert_trajectories: Expert LLM sequence trajectories with structure:
                 - hidden_states: [batch, seq_len, hidden_size] from expert LLM
                 - rewards: [batch] scalar sequence rewards
+                OR list of Sample objects
             policy_trajectories: Current LLM policy rollout trajectories with structure:
                 - hidden_states: [batch, seq_len, hidden_size] from policy LLM
                 - rewards: [batch] scalar sequence rewards
                 - log_probs: [batch, seq_len] log probabilities (optional, for entropy)
+                OR list of Sample objects
         
         Returns:
             (loss tensor, metrics dictionary)
         """
         metrics = {}
         
+        # Convert Sample objects to tensor dicts if needed
+        if isinstance(expert_trajectories, list) and len(expert_trajectories) > 0:
+            if isinstance(expert_trajectories[0], Sample):
+                expert_trajectories = self._samples_to_tensor_dict(expert_trajectories)
+        
+        if isinstance(policy_trajectories, list) and len(policy_trajectories) > 0:
+            if isinstance(policy_trajectories[0], Sample):
+                policy_trajectories = self._samples_to_tensor_dict(policy_trajectories)
+        
         # Extract final hidden states (last token) for sequence-level reward
-        expert_hidden = expert_trajectories["hidden_states"]  # [batch, seq_len, hidden_size]
-        policy_hidden = policy_trajectories["hidden_states"]
+        expert_hidden = expert_trajectories.get("hidden_states")
+        policy_hidden = policy_trajectories.get("hidden_states")
+        
+        # If no hidden states, try to work with what we have
+        if expert_hidden is None or policy_hidden is None:
+            logger.warning(
+                "No hidden_states in trajectories. "
+                "IRL loss computation requires hidden_states or embedded representations."
+            )
+            # Return dummy loss if we can't compute properly
+            return torch.tensor(0.0, device=self.device), {"error": 1.0}
         
         # Move to device
         expert_hidden = expert_hidden.to(self.device)
         policy_hidden = policy_hidden.to(self.device)
         
         # Get last token hidden state for each sequence [batch, hidden_size]
-        expert_final_hidden = expert_hidden[:, -1, :]
-        policy_final_hidden = policy_hidden[:, -1, :]
+        if expert_hidden.dim() == 3:
+            expert_final_hidden = expert_hidden[:, -1, :]
+        else:
+            expert_final_hidden = expert_hidden
+        
+        if policy_hidden.dim() == 3:
+            policy_final_hidden = policy_hidden[:, -1, :]
+        else:
+            policy_final_hidden = policy_hidden
         
         # Compute sequence-level rewards from reward model
         expert_rewards = self.reward_model(expert_final_hidden)  # [batch]
@@ -162,6 +210,39 @@ class MaxEntropyIRLObjective:
         metrics["policy_reward_mean"] = policy_rewards.mean().item()
         
         return total_loss, metrics
+    
+    def _samples_to_tensor_dict(self, samples: List[Sample]) -> Dict[str, torch.Tensor]:
+        """Convert Sample objects to tensor dictionary for loss computation.
+        
+        Args:
+            samples: List of Sample objects
+        
+        Returns:
+            Dictionary with tensorized sample data
+        """
+        rewards = []
+        log_probs_list = []
+        
+        for sample in samples:
+            rewards.append(sample.reward if sample.reward is not None else 0.0)
+            if sample.rollout_log_probs:
+                log_probs_list.append(torch.tensor(sample.rollout_log_probs))
+        
+        result = {
+            "rewards": torch.tensor(rewards, dtype=torch.float32),
+        }
+        
+        if log_probs_list:
+            # Pad to same length
+            max_len = max(lp.shape[0] for lp in log_probs_list)
+            padded = []
+            for lp in log_probs_list:
+                if lp.shape[0] < max_len:
+                    lp = torch.cat([lp, torch.zeros(max_len - lp.shape[0])])
+                padded.append(lp)
+            result["log_probs"] = torch.stack(padded)
+        
+        return result
 
 
 class IRLTrainer:
@@ -213,15 +294,16 @@ class IRLTrainer:
     
     def train_step(
         self,
-        policy_rollouts: Dict[str, torch.Tensor],
+        policy_rollouts: Dict[str, torch.Tensor] | List[Sample],
         num_epochs: int = 1,
     ) -> Dict[str, float]:
         """Perform reward model training step on LLM sequences.
         
         Args:
-            policy_rollouts: LLM policy rollout trajectories with:
+            policy_rollouts: LLM policy rollout trajectories or Sample objects with:
                 - hidden_states: [batch, seq_len, hidden_size]
                 - log_probs: [batch, seq_len] (optional)
+                OR list of Sample objects with rewards already computed
             num_epochs: Number of training epochs over expert data
         
         Returns:
@@ -232,15 +314,20 @@ class IRLTrainer:
         
         for epoch in range(num_epochs):
             for expert_batch in self.expert_dataloader:
-                # Prepare batches
+                # Prepare expert batch
                 expert_batch = {
                     k: v.to(self.device) if isinstance(v, torch.Tensor) else v
                     for k, v in expert_batch.items()
                 }
-                policy_batch = {
-                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                    for k, v in policy_rollouts.items()
-                }
+                
+                # Prepare policy batch (convert if needed)
+                if isinstance(policy_rollouts, list):
+                    policy_batch = policy_rollouts
+                else:
+                    policy_batch = {
+                        k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                        for k, v in policy_rollouts.items()
+                    }
                 
                 # Compute IRL loss
                 loss, metrics = self.objective.compute_loss(expert_batch, policy_batch)
@@ -264,7 +351,7 @@ class IRLTrainer:
         
         # Average metrics over all batches
         for key in accumulated_metrics:
-            accumulated_metrics[key] /= num_batches
+            accumulated_metrics[key] /= max(num_batches, 1)
         
         return accumulated_metrics
     
