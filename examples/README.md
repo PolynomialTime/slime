@@ -8,6 +8,7 @@ These examples provide concrete examples to leverage slime in your own RL workfl
 - **[fully_async](./fully_async)**: Demonstrates fully asynchronous rollout generation for higher efficiency.
 - **[geo3k_vlm](./geo3k_vlm)**: Training VLMs with FSDP on a single-turn reasoning task using GRPO on the GEO3K dataset.
 - **[geo3k_vlm_multi_turn](./geo3k_vlm_multi_turn)**: VLM multi-turn training (FSDP backend) on Geo3k dataset.
+- **[hh-rlhf-training](./hh-rlhf-training)**: Complete training setup for HH-RLHF dataset with data preprocessing, format validation, and training scripts following slime standard format.
 - **[low_precision](./low_precision)**: Examples of FP8 training and inference for improved throughput and stability.
 - **[multi_agent](./multi_agent)**: Example of running multi-agent RL with `slime`.
 - **[on_policy_distillation](./on_policy_distillation)**: Example implementation for on-policy distillation, extending the reinforcement learning pipeline to support teacher–student distillation directly within on-policy training.
