@@ -111,6 +111,14 @@ IRL_ARGS=(
    --save-debug-rollout-data /root/irl_rollout/rollout_{rollout_id}.pt
 )
 
+IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-direct})
+if [ -n "${REWARD_UPDATE_ACCELERATE_CONFIG}" ]; then
+  IRL_ARGS+=(--reward-update-accelerate-config ${REWARD_UPDATE_ACCELERATE_CONFIG})
+fi
+if [ -n "${REWARD_UPDATE_ACCELERATE_NUM_PROC}" ]; then
+  IRL_ARGS+=(--reward-update-accelerate-num-proc ${REWARD_UPDATE_ACCELERATE_NUM_PROC})
+fi
+
 EVAL_ARGS=(
    # --eval-interval 20
    # --eval-prompt-data aime /path/to/aime.jsonl

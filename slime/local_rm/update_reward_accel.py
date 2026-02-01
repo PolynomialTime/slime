@@ -1,12 +1,20 @@
-import os
+import argparse
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
+from accelerate import Accelerator
 
 from .data import iter_batches, load_demo_samples, load_rollout_samples
 from .model import RunningMeanStd, get_sequence_rewards, init_reward_model, load_tokenizer
+
+
+def _shard_samples(samples: list, process_index: int, num_processes: int) -> list:
+    if num_processes <= 1:
+        return samples
+    return samples[process_index::num_processes]
 
 
 def _atomic_save(model, save_dir: Path) -> None:
@@ -24,38 +32,31 @@ def _atomic_save(model, save_dir: Path) -> None:
     tmp_dir.rename(save_dir)
 
 
-def _collect_rollout_paths(args, rollout_id: int, rollout_path: str) -> list[str]:
-    window = int(getattr(args, "reward_update_rollout_window", 1) or 1)
-    if window <= 1:
-        return [rollout_path]
-
-    template = getattr(args, "save_debug_rollout_data", None)
-    if template is None:
-        return [rollout_path]
-
-    paths = []
-    start = max(0, rollout_id - window + 1)
-    for rid in range(start, rollout_id + 1):
-        p = template.format(rollout_id=rid)
-        if os.path.exists(p):
-            paths.append(p)
-    if not paths:
-        paths = [rollout_path]
-    return paths
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--args-json", type=str, required=True)
+    parser.add_argument("--rollout-id", type=int, required=True)
+    parser.add_argument("--rollout-path", type=str, required=True)
+    return parser.parse_args()
 
 
-def update_reward(args, rollout_id: int, rollout_path: str) -> None:
-    reward_dir = Path(args.reward_model_dir)
-    reward_dir.mkdir(parents=True, exist_ok=True)
+def main():
+    cli = parse_args()
+    with open(cli.args_json, encoding="utf-8") as f:
+        cfg_dict = json.load(f)
+    args = SimpleNamespace(**cfg_dict)
+
+    accelerator = Accelerator()
 
     base_model = args.reward_model_init or args.hf_checkpoint
+    reward_dir = Path(args.reward_model_dir)
+    reward_dir.mkdir(parents=True, exist_ok=True)
     model_path = reward_dir / "latest"
 
     tokenizer = load_tokenizer(base_model)
     # Always start reward model from base weights each update
     model = init_reward_model(base_model, None)
     model.config.c_coef = float(getattr(args, "c_coef_init", 1.0))
-    model.train()
 
     # Old model is the previous reward checkpoint (if exists)
     old_model = init_reward_model(base_model, str(model_path) if model_path.exists() else None)
@@ -63,9 +64,9 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
     for p in old_model.parameters():
         p.requires_grad_(False)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    old_model.to(device)
+    optimizer = optim.AdamW(model.parameters(), lr=args.reward_update_lr)
+    model, optimizer = accelerator.prepare(model, optimizer)
+    old_model.to(accelerator.device)
 
     demo_samples = []
     if args.reward_demo_path:
@@ -78,16 +79,27 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
             apply_chat_template_kwargs=args.apply_chat_template_kwargs,
         )
 
-    rollout_paths = _collect_rollout_paths(args, rollout_id, rollout_path)
     rollout_samples = []
+    rollout_paths = [cli.rollout_path]
+    window = int(getattr(args, "reward_update_rollout_window", 1) or 1)
+    if window > 1 and getattr(args, "save_debug_rollout_data", None):
+        start = max(0, cli.rollout_id - window + 1)
+        rollout_paths = [
+            args.save_debug_rollout_data.format(rollout_id=i)
+            for i in range(start, cli.rollout_id + 1)
+        ]
     for p in rollout_paths:
-        rollout_samples.extend(load_rollout_samples(p))
+        if Path(p).exists():
+            rollout_samples.extend(load_rollout_samples(p))
+
     if not demo_samples or not rollout_samples:
         return
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.reward_update_lr)
-    rms = RunningMeanStd(device=device)
+    demo_samples = _shard_samples(demo_samples, accelerator.process_index, accelerator.num_processes)
+    rollout_samples = _shard_samples(rollout_samples, accelerator.process_index, accelerator.num_processes)
 
+    pad_id = tokenizer.pad_token_id
+    rms = RunningMeanStd(device=accelerator.device)
     c_coef = float(getattr(model.config, "c_coef", 1.0))
     c_coef_min = getattr(args, "c_coef_min", 0.1)
     c_coef_max = getattr(args, "c_coef_max", 10.0)
@@ -95,7 +107,6 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
 
-    pad_id = tokenizer.pad_token_id
     for _ in range(args.reward_update_epochs):
         for demo_batch, roll_batch in zip(
             iter_batches(demo_samples, args.reward_update_batch_size),
@@ -104,29 +115,29 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
             demo_tokens = [s.tokens for s in demo_batch]
             roll_tokens = [s.tokens for s in roll_batch]
 
-            rewards_demo = get_sequence_rewards(model, demo_tokens, pad_id, device)
-            rewards_roll = get_sequence_rewards(model, roll_tokens, pad_id, device)
+            rewards_demo = get_sequence_rewards(model, demo_tokens, pad_id, accelerator.device)
+            rewards_roll = get_sequence_rewards(model, roll_tokens, pad_id, accelerator.device)
 
             with torch.no_grad():
-                rewards_demo_old = get_sequence_rewards(old_model, demo_tokens, pad_id, device)
-                rewards_roll_old = get_sequence_rewards(old_model, roll_tokens, pad_id, device)
+                rewards_demo_old = get_sequence_rewards(old_model, demo_tokens, pad_id, accelerator.device)
+                rewards_roll_old = get_sequence_rewards(old_model, roll_tokens, pad_id, accelerator.device)
 
             l_old = rewards_demo.mean() - rewards_roll.mean()
-
             delta = torch.cat(
                 [rewards_demo - rewards_demo_old, rewards_roll - rewards_roll_old], dim=0
             )
             epsilon = torch.sqrt(torch.mean(delta ** 2))
 
             loss = -(l_old - c_coef * epsilon)
-            optimizer.zero_grad()
-            loss.backward()
+            accelerator.backward(loss)
             optimizer.step()
+            optimizer.zero_grad()
 
             with torch.no_grad():
                 rewards_norm = torch.cat([rewards_demo.detach(), rewards_roll.detach()], dim=0)
                 raw = rewards_norm * float(model.config.normalization_constant) + float(model.config.bias)
-                rms.update_from_batch(raw)
+                raw_all = accelerator.gather(raw)
+                rms.update_from_batch(raw_all)
                 new_bias = float(rms.mean.item())
                 new_std = float(rms.std.item())
                 if new_std < 1e-3:
@@ -135,17 +146,24 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
                 model.config.normalization_constant = new_std
 
             with torch.no_grad():
+                eps_all = accelerator.gather(epsilon.detach())
+                epsilon_global = eps_all.mean().item()
                 hi = target_reward_l2_norm * 1.2
                 lo = target_reward_l2_norm * 0.8
-                eps_val = epsilon.item()
-                if eps_val > hi:
+                if epsilon_global > hi:
                     c_coef *= coef_scale_up
-                elif eps_val < lo:
+                elif epsilon_global < lo:
                     c_coef *= coef_scale_down
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
                 model.config.c_coef = float(c_coef)
 
-    step_dir = reward_dir / f"step_{rollout_id}"
-    step_dir.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(step_dir, safe_serialization=False)
-    _atomic_save(model, model_path)
+    if accelerator.is_main_process:
+        unwrapped = accelerator.unwrap_model(model)
+        step_dir = reward_dir / f"step_{cli.rollout_id}"
+        step_dir.mkdir(parents=True, exist_ok=True)
+        unwrapped.save_pretrained(step_dir, safe_serialization=False)
+        _atomic_save(unwrapped, model_path)
+
+
+if __name__ == "__main__":
+    main()

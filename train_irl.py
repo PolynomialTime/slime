@@ -1,5 +1,8 @@
+import json
 import logging
+import subprocess
 from argparse import ArgumentParser
+from pathlib import Path
 
 import ray
 
@@ -103,6 +106,25 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         help="Update reward model every N rollouts (1 means every rollout).",
     )
     parser.add_argument(
+        "--reward-update-launcher",
+        type=str,
+        default="direct",
+        choices=["direct", "accelerate"],
+        help="How to launch reward update (direct in-process or accelerate).",
+    )
+    parser.add_argument(
+        "--reward-update-accelerate-config",
+        type=str,
+        default=None,
+        help="Accelerate config file path for reward update.",
+    )
+    parser.add_argument(
+        "--reward-update-accelerate-num-proc",
+        type=int,
+        default=None,
+        help="Number of processes for accelerate reward update.",
+    )
+    parser.add_argument(
         "--reward-update-rollout-window",
         type=int,
         default=1,
@@ -135,9 +157,53 @@ def _call_reward_update(args, rollout_id: int) -> None:
         return
 
     rollout_path = args.save_debug_rollout_data.format(rollout_id=rollout_id)
-    update_fn = load_function(args.reward_update_fn_path)
-    logger.info("Updating reward model using %s on %s", args.reward_update_fn_path, rollout_path)
-    update_fn(args, rollout_id, rollout_path)
+    if args.reward_update_launcher == "accelerate":
+        reward_dir = Path(args.reward_model_dir)
+        reward_dir.mkdir(parents=True, exist_ok=True)
+        args_json_path = reward_dir / "reward_update_args.json"
+        reward_args = {
+            "hf_checkpoint": args.hf_checkpoint,
+            "reward_model_dir": args.reward_model_dir,
+            "reward_model_init": args.reward_model_init,
+            "reward_demo_path": args.reward_demo_path,
+            "reward_demo_prompt_key": args.reward_demo_prompt_key,
+            "reward_demo_answer_key": args.reward_demo_answer_key,
+            "reward_update_epochs": args.reward_update_epochs,
+            "reward_update_batch_size": args.reward_update_batch_size,
+            "reward_update_lr": args.reward_update_lr,
+            "c_coef_init": args.c_coef_init,
+            "c_coef_min": args.c_coef_min,
+            "c_coef_max": args.c_coef_max,
+            "coef_scale_up": args.coef_scale_up,
+            "coef_scale_down": args.coef_scale_down,
+            "target_reward_l2_norm": args.target_reward_l2_norm,
+            "apply_chat_template": args.apply_chat_template,
+            "apply_chat_template_kwargs": args.apply_chat_template_kwargs,
+            "save_debug_rollout_data": args.save_debug_rollout_data,
+            "reward_update_rollout_window": args.reward_update_rollout_window,
+        }
+        args_json_path.write_text(json.dumps(reward_args, ensure_ascii=False, indent=2), encoding="utf-8")
+        cmd = ["accelerate", "launch"]
+        if args.reward_update_accelerate_config:
+            cmd += ["--config_file", args.reward_update_accelerate_config]
+        if args.reward_update_accelerate_num_proc:
+            cmd += ["--num_processes", str(args.reward_update_accelerate_num_proc)]
+        cmd += [
+            "-m",
+            "slime.local_rm.update_reward_accel",
+            "--args-json",
+            str(args_json_path),
+            "--rollout-id",
+            str(rollout_id),
+            "--rollout-path",
+            rollout_path,
+        ]
+        logger.info("Launching reward update via accelerate: %s", " ".join(cmd))
+        subprocess.run(cmd, check=True)
+    else:
+        update_fn = load_function(args.reward_update_fn_path)
+        logger.info("Updating reward model using %s on %s", args.reward_update_fn_path, rollout_path)
+        update_fn(args, rollout_id, rollout_path)
 
 
 def train(args) -> None:
