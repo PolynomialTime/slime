@@ -183,9 +183,9 @@ class BiLevelOptimizer:
         self.iteration_count += 1
         return should_update
     
-    def get_info(self) -> Dict[str, any]:
+    def get_info(self) -> Dict[str, Any]:
         """Get optimizer state information.
-        
+
         Returns:
             Dictionary with optimizer info
         """
@@ -394,13 +394,13 @@ class BiLevelTrainingLoop:
         self,
         rollout_id: int,
         rollout_data: Dict[str, torch.Tensor],
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """Process a rollout: update policy and/or reward model.
-        
+
         Args:
             rollout_id: Current rollout ID
             rollout_data: Rollout data from policy
-        
+
         Returns:
             Dictionary with update info
         """
@@ -410,10 +410,10 @@ class BiLevelTrainingLoop:
             "reward_updated": False,
             "reward_metrics": {},
         }
-        
+
         # Check if reward should be updated
         should_update_reward = self.optimizer.step()
-        
+
         if should_update_reward:
             logger.info(f"Rollout {rollout_id}: Updating reward model")
             metrics = self.optimizer.update_reward_model(
@@ -422,5 +422,5 @@ class BiLevelTrainingLoop:
             )
             update_info["reward_updated"] = True
             update_info["reward_metrics"] = metrics
-        
+
         return update_info

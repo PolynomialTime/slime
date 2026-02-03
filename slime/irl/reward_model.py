@@ -237,9 +237,12 @@ class TrajectoryRewardModel(nn.Module):
         # Pool: take mean of all timesteps
         if mask is not None:
             # Average only over non-masked positions
-            mask_expanded = mask.unsqueeze(-1).expand(encoded.shape)
-            pooled = encoded[~mask_expanded].reshape(encoded.shape[0], -1)
-            pooled = pooled.mean(dim=-1, keepdim=True)
+            # mask is [batch_size, seq_len], True for padding positions
+            mask_expanded = mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+            # Set masked positions to 0, compute sum, then divide by number of valid positions
+            encoded_masked = encoded.masked_fill(mask_expanded, 0.0)
+            valid_counts = (~mask).sum(dim=1, keepdim=True).clamp(min=1)  # [batch_size, 1]
+            pooled = encoded_masked.sum(dim=1) / valid_counts  # [batch_size, input_size]
         else:
             pooled = encoded.mean(dim=1)  # [batch_size, input_size]
         
@@ -253,22 +256,23 @@ def create_reward_model(
     model_type: str = "mlp",
 ) -> nn.Module:
     """Factory function to create reward model.
-    
+
     Args:
         args: Arguments containing reward model configuration
             - reward_model_hidden_size: hidden dimension
             - reward_model_num_layers: number of layers
             - reward_model_dropout: dropout rate
         model_type: "mlp" or "trajectory"
-    
+
     Returns:
         Reward model instance
     """
     hidden_size = getattr(args, "reward_model_hidden_size", 512)
     num_layers = getattr(args, "reward_model_num_layers", 2)
     dropout = getattr(args, "reward_model_dropout", 0.1)
-    input_size = getattr(args, "hf_config_hidden_size", args.hidden_size)
-    
+    # Safely get input_size with multiple fallbacks
+    input_size = getattr(args, "hf_config_hidden_size", getattr(args, "hidden_size", 4096))
+
     if model_type == "mlp":
         return RewardModel(
             input_size=input_size,

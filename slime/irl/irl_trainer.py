@@ -298,20 +298,29 @@ class IRLTrainer:
         num_epochs: int = 1,
     ) -> Dict[str, float]:
         """Perform reward model training step on LLM sequences.
-        
+
         Args:
             policy_rollouts: LLM policy rollout trajectories or Sample objects with:
                 - hidden_states: [batch, seq_len, hidden_size]
                 - log_probs: [batch, seq_len] (optional)
                 OR list of Sample objects with rewards already computed
             num_epochs: Number of training epochs over expert data
-        
+
         Returns:
             Metrics dictionary with loss values
         """
         accumulated_metrics = {}
         num_batches = 0
-        
+
+        # Prepare policy data once (outside the loop)
+        if isinstance(policy_rollouts, list):
+            policy_data = policy_rollouts
+        else:
+            policy_data = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in policy_rollouts.items()
+            }
+
         for epoch in range(num_epochs):
             for expert_batch in self.expert_dataloader:
                 # Prepare expert batch
@@ -319,19 +328,37 @@ class IRLTrainer:
                     k: v.to(self.device) if isinstance(v, torch.Tensor) else v
                     for k, v in expert_batch.items()
                 }
-                
-                # Prepare policy batch (convert if needed)
-                if isinstance(policy_rollouts, list):
-                    policy_batch = policy_rollouts
+
+                # Sample policy batch to match expert batch size if policy data is dict
+                if isinstance(policy_data, dict) and "hidden_states" in policy_data:
+                    # Determine expert batch size
+                    if "hidden_states" in expert_batch:
+                        expert_batch_size = len(expert_batch["hidden_states"])
+                    elif "tokens" in expert_batch:
+                        expert_batch_size = len(expert_batch["tokens"])
+                    else:
+                        # No clear batch dimension in expert batch, use policy data as is
+                        expert_batch_size = 0
+
+                    policy_hidden = policy_data["hidden_states"]
+
+                    if expert_batch_size > 0 and len(policy_hidden) >= expert_batch_size:
+                        # Sample random indices to match expert batch size
+                        indices = torch.randperm(len(policy_hidden))[:expert_batch_size]
+                        policy_batch = {
+                            k: v[indices] if isinstance(v, torch.Tensor) and len(v) == len(policy_hidden) else v
+                            for k, v in policy_data.items()
+                        }
+                    else:
+                        # Use all policy data if smaller than expert batch or if expert_batch_size is 0
+                        policy_batch = policy_data
                 else:
-                    policy_batch = {
-                        k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                        for k, v in policy_rollouts.items()
-                    }
-                
+                    # For Sample objects, use as is
+                    policy_batch = policy_data
+
                 # Compute IRL loss
                 loss, metrics = self.objective.compute_loss(expert_batch, policy_batch)
-                
+
                 # Backward pass with gradient clipping
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -340,19 +367,19 @@ class IRLTrainer:
                     max_norm=1.0,
                 )
                 self.optimizer.step()
-                
+
                 # Accumulate metrics
                 for key, val in metrics.items():
                     if key not in accumulated_metrics:
                         accumulated_metrics[key] = 0.0
                     accumulated_metrics[key] += val
-                
+
                 num_batches += 1
-        
+
         # Average metrics over all batches
         for key in accumulated_metrics:
             accumulated_metrics[key] /= max(num_batches, 1)
-        
+
         return accumulated_metrics
     
     def get_reward_fn(self):
