@@ -2,7 +2,7 @@
 
 # Generic IRL training script (PPO -> reward update -> PPO ...)
 # Usage:
-#   MODEL_SH=scripts/models/your-model.sh \
+#   MODEL_SH=scripts/models/qwen3-1.7B.sh \
 #   HF_CKPT=/path/to/hf_ckpt \
 #   REF_CKPT=/path/to/ref_ckpt \
 #   ACTOR_CKPT=/path/to/actor_ckpt \
@@ -73,7 +73,7 @@ CKPT_ARGS=(
 
 ROLLOUT_ARGS=(
    --prompt-data ${PROMPT_DATA}
-   --input-key prompt
+   --input-key text
    --label-key label
    --apply-chat-template
    --rollout-shuffle
