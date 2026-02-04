@@ -3,7 +3,7 @@
 # Generic IRL training script (PPO -> reward update -> PPO ...)
 # Usage:
 #   MODEL_SH=scripts/models/qwen3-1.7B.sh \
-#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
+#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
 #   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
 #   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
 #   SAVE_DIR=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
@@ -58,8 +58,8 @@ if [[ "$HF_CKPT" == "/path/to/"* ]]; then
 fi
 
 # Resource config
-ACTOR_GPUS=${ACTOR_GPUS:-4}
-CRITIC_GPUS=${CRITIC_GPUS:-4}
+ACTOR_GPUS=${ACTOR_GPUS:-2}
+CRITIC_GPUS=${CRITIC_GPUS:-2}
 ROLLOUT_GPUS=${ROLLOUT_GPUS:-4}
 USE_COLOCATE=${USE_COLOCATE:-1}
 
@@ -180,7 +180,7 @@ else
 fi
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 4 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
