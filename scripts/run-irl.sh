@@ -108,7 +108,7 @@ IRL_ARGS=(
    --reward-update-epochs 1
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
-   --save-debug-rollout-data /root/irl_rollout/rollout_{rollout_id}.pt
+   --save-debug-rollout-data /mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/rollout_{rollout_id}.pt
 )
 
 IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-direct})
@@ -131,7 +131,7 @@ PERF_ARGS=(
    --tensor-model-parallel-size 2
    --sequence-parallel
    --pipeline-model-parallel-size 1
-   --context-parallel-size 2
+   --context-parallel-size 1
    --expert-model-parallel-size 1
    --expert-tensor-parallel-size 1
 
