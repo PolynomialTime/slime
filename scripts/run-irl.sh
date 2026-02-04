@@ -3,10 +3,10 @@
 # Generic IRL training script (PPO -> reward update -> PPO ...)
 # Usage:
 #   MODEL_SH=scripts/models/qwen3-1.7B.sh \
-#   HF_CKPT=/path/to/hf_ckpt \
-#   REF_CKPT=/path/to/ref_ckpt \
-#   ACTOR_CKPT=/path/to/actor_ckpt \
-#   SAVE_DIR=/path/to/save_dir \
+#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
+#   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
+#   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
+#   SAVE_DIR=//mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
 #   PROMPT_DATA=/path/to/prompt.jsonl \
 #   DEMO_DATA=/path/to/demo.jsonl \
 #   bash scripts/run-irl.sh
