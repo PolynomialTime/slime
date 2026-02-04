@@ -111,6 +111,25 @@ def convert_hh_rlhf_to_slime_format(input_file, output_file):
     print(f"输出文件: {output_file}")
 
 
+def merge_jsonl_files(input_files, output_file):
+    """
+    合并多个 jsonl 文件为一个 jsonl 文件（按文件顺序拼接）
+    """
+    total = 0
+    with open(output_file, "w", encoding="utf-8") as out_f:
+        for file_path in input_files:
+            if not file_path.exists():
+                print(f"跳过合并 (文件不存在): {file_path}")
+                continue
+            with open(file_path, "r", encoding="utf-8") as in_f:
+                for line in in_f:
+                    out_f.write(line)
+                    total += 1
+
+    print(f"合并完成: {total} 条数据")
+    print(f"合并输出: {output_file}")
+
+
 
 def main():
     # 设置路径
@@ -136,6 +155,24 @@ def main():
             convert_hh_rlhf_to_slime_format(input_file, output_file)
         else:
             print(f"\n跳过 (文件不存在): {input_file}")
+
+    # 合并 helpful + harmless 为 train/test 两个文件
+    print(f"\n{'='*60}")
+    print("合并 helpful 与 harmless 的 train/test 数据")
+    print(f"{'='*60}")
+    merge_map = {
+        "train": [
+            output_dir / "helpful-base-train.jsonl",
+            output_dir / "harmless-base-train.jsonl",
+        ],
+        "test": [
+            output_dir / "helpful-base-test.jsonl",
+            output_dir / "harmless-base-test.jsonl",
+        ],
+    }
+    for split, files in merge_map.items():
+        merged_file = output_dir / f"hh-rlhf-merged-{split}.jsonl"
+        merge_jsonl_files(files, merged_file)
     
     print(f"\n{'='*60}")
     print("所有数据集转换完成！")
