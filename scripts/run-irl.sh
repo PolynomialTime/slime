@@ -3,12 +3,12 @@
 # Generic IRL training script (PPO -> reward update -> PPO ...)
 # Usage:
 #   MODEL_SH=scripts/models/qwen3-1.7B.sh \
-#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
-#   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
-#   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
-#   SAVE_DIR=//mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
-#   PROMPT_DATA=/path/to/prompt.jsonl \
-#   DEMO_DATA=/path/to/demo.jsonl \
+#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
+#   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
+#   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
+#   SAVE_DIR=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
+#   PROMPT_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
+#   DEMO_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
 #   bash scripts/run-irl.sh
 
 # for rerun the task
@@ -101,8 +101,8 @@ PPO_ARGS=(
 IRL_ARGS=(
    --custom-rm-path slime.local_rm.custom_rm.custom_rm
    --reward-demo-path ${DEMO_DATA}
-   --reward-demo-prompt-key prompt
-   --reward-demo-answer-key answer
+   --reward-demo-prompt-key text
+   --reward-demo-answer-key label
    --reward-model-dir reward_model
    --reward-update-interval 1
    --reward-update-epochs 1
