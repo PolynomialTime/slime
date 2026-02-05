@@ -3,12 +3,12 @@
 # Generic IRL training script (PPO -> reward update -> PPO ...)
 # Usage:
 #   MODEL_SH=scripts/models/qwen3-1.7B.sh \
-#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
-#   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
-#   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
-#   SAVE_DIR=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
-#   PROMPT_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
-#   DEMO_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
+#   HF_CKPT=/mnt/shared-storage-user/wangqianyi/slime/models/qwen3-1.7b-base \
+#   REF_CKPT=/mnt/shared-storage-user/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
+#   ACTOR_CKPT=/mnt/shared-storage-user/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
+#   SAVE_DIR=/mnt/shared-storage-user/wangqianyi/slime/models/save_dir \
+#   PROMPT_DATA=/mnt/shared-storage-user/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
+#   DEMO_DATA=/mnt/shared-storage-user/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
 #   REWARD_UPDATE_LAUNCHER=accelerate
 #   bash scripts/run-irl.sh
 
@@ -104,16 +104,16 @@ IRL_ARGS=(
    --reward-demo-path ${DEMO_DATA}
    --reward-demo-prompt-key text
    --reward-demo-answer-key label
-   --reward-eval-path /mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-test.jsonl 
+   --reward-eval-path /mnt/shared-storage-user/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-test.jsonl
    --reward-eval-prompt-key text
    --reward-eval-chosen-key chosen
    --reward-eval-rejected-key rejected
-   --reward-model-dir models/reward_model
+   --reward-model-dir /mnt/shared-storage-user/wangqianyi/slime/models/reward_model
    --reward-update-interval 1
    --reward-update-epochs 1
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
-   --save-debug-rollout-data /mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/rollout/rollout_{rollout_id}.pt
+   --save-debug-rollout-data /mnt/shared-storage-user/wangqianyi/slime/rollout/rollout_{rollout_id}.pt
 )
 
 IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-direct})
