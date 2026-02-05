@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -183,6 +184,12 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         default=None,
         help="Max number of eval samples to score. If not set, evaluate all.",
     )
+    parser.add_argument(
+        "--reward-eval-cuda-visible-devices",
+        type=str,
+        default=None,
+        help="CUDA_VISIBLE_DEVICES for reward eval subprocess.",
+    )
     return parser
 
 
@@ -252,6 +259,47 @@ def _call_reward_update(args, rollout_id: int) -> bool:
         logger.info("Updating reward model using %s on %s", args.reward_update_fn_path, rollout_path)
         update_fn(args, rollout_id, rollout_path)
     return True
+
+
+def _call_reward_eval(args, rollout_id: int) -> None:
+    if args.reward_eval_path is None and args.reward_demo_path is None:
+        return
+
+    if args.reward_eval_cuda_visible_devices:
+        reward_dir = Path(args.reward_model_dir)
+        reward_dir.mkdir(parents=True, exist_ok=True)
+        args_json_path = reward_dir / "reward_eval_args.json"
+        eval_args = {
+            "hf_checkpoint": args.hf_checkpoint,
+            "reward_model_dir": args.reward_model_dir,
+            "reward_model_init": args.reward_model_init,
+            "reward_demo_path": args.reward_demo_path,
+            "reward_demo_prompt_key": args.reward_demo_prompt_key,
+            "reward_eval_path": args.reward_eval_path,
+            "reward_eval_prompt_key": args.reward_eval_prompt_key,
+            "reward_eval_chosen_key": args.reward_eval_chosen_key,
+            "reward_eval_rejected_key": args.reward_eval_rejected_key,
+            "reward_eval_batch_size": args.reward_eval_batch_size,
+            "reward_eval_max_samples": args.reward_eval_max_samples,
+            "reward_update_batch_size": args.reward_update_batch_size,
+            "apply_chat_template": args.apply_chat_template,
+            "apply_chat_template_kwargs": args.apply_chat_template_kwargs,
+        }
+        args_json_path.write_text(json.dumps(eval_args, ensure_ascii=False, indent=2), encoding="utf-8")
+        cmd = [
+            sys.executable,
+            "-m",
+            "slime.local_rm.reward_eval_cli",
+            "--args-json",
+            str(args_json_path),
+            "--rollout-id",
+            str(rollout_id),
+        ]
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = args.reward_eval_cuda_visible_devices
+        subprocess.run(cmd, check=True, env=env)
+    else:
+        reward_eval(args, rollout_id)
 
 
 def train(args) -> None:
@@ -326,7 +374,7 @@ def train(args) -> None:
             save(rollout_id)
 
         if is_updated is True:
-            # reward_eval(args, rollout_id)
+            _call_reward_eval(args, rollout_id)
             continue
 
         offload_train()

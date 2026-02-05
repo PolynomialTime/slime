@@ -42,6 +42,7 @@ def reward_eval(args, rollout_id: int) -> None:
 
     base_model = args.reward_model_init or args.hf_checkpoint
     tokenizer = load_tokenizer(base_model)
+    pad_id = tokenizer.pad_token_id
     model = init_reward_model(base_model, str(model_path))
     model.eval()
 

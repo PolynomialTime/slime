@@ -119,6 +119,7 @@ IRL_ARGS=(
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
    --reward-update-cuda-visible-devices 3
+   --reward-eval-cuda-visible-devices 3
    --save-debug-rollout-data /mnt/shared-storage-user/wangqianyi/slime/rollout/rollout_{rollout_id}.pt
 )
 
