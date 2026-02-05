@@ -321,8 +321,8 @@ def train(args) -> None:
         if args.offload_rollout:
             ray.get(rollout_manager.onload_weights.remote())
         actor_model.update_weights()
-        if args.offload_rollout:
-            ray.get(rollout_manager.onload_kv.remote())
+        # if args.offload_rollout:
+        #     ray.get(rollout_manager.onload_kv.remote())
 
         # did_reward_update = _call_reward_update(args, rollout_id)
         # if did_reward_update:
