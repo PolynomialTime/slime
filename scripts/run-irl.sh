@@ -104,8 +104,12 @@ IRL_ARGS=(
    --reward-demo-path ${DEMO_DATA}
    --reward-demo-prompt-key text
    --reward-demo-answer-key label
+   --reward-eval-path /mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-test.jsonl 
+   --reward-eval-prompt-key text
+   --reward-eval-chosen-key chosen
+   --reward-eval-rejected-key rejected
    --reward-model-dir models/reward_model
-   --reward-update-interval 2
+   --reward-update-interval 1
    --reward-update-epochs 1
    --reward-update-batch-size 8
    --reward-update-lr 1e-5

@@ -7,6 +7,7 @@ from pathlib import Path
 import ray
 
 from slime.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
+from slime.local_rm.reward_eval import reward_eval
 from slime.utils.arguments import parse_args
 from slime.utils.logging_utils import configure_logger, init_tracking
 from slime.utils.misc import load_function, should_run_periodic_action
@@ -131,6 +132,42 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         help="Number of recent rollout files to aggregate for each reward update.",
     )
     parser.add_argument(
+        "--reward-eval-path",
+        type=str,
+        default=None,
+        help="Path to reward eval jsonl (prompt+chosen+rejected). Defaults to reward_demo_path if not set.",
+    )
+    parser.add_argument(
+        "--reward-eval-prompt-key",
+        type=str,
+        default=None,
+        help="JSON key for reward eval prompt. Defaults to reward_demo_prompt_key if not set.",
+    )
+    parser.add_argument(
+        "--reward-eval-chosen-key",
+        type=str,
+        default="chosen",
+        help="JSON key for reward eval chosen answer.",
+    )
+    parser.add_argument(
+        "--reward-eval-rejected-key",
+        type=str,
+        default="rejected",
+        help="JSON key for reward eval rejected answer.",
+    )
+    parser.add_argument(
+        "--reward-eval-batch-size",
+        type=int,
+        default=None,
+        help="Batch size for reward eval. Defaults to reward_update_batch_size if not set.",
+    )
+    parser.add_argument(
+        "--reward-eval-max-samples",
+        type=int,
+        default=None,
+        help="Max number of eval samples to score. If not set, evaluate all.",
+    )
+    parser.add_argument(
         "--reward-update-fn-path",
         type=str,
         default="slime.local_rm.update_reward.update_reward",
@@ -148,13 +185,13 @@ def _maybe_set_default_debug_path(args) -> None:
         logger.info("save_debug_rollout_data not set, defaulting to %s", args.save_debug_rollout_data)
 
 
-def _call_reward_update(args, rollout_id: int) -> None:
+def _call_reward_update(args, rollout_id: int) -> bool:
     if args.reward_update_fn_path is None:
-        return
+        return False
     if args.reward_update_interval is None or args.reward_update_interval <= 0:
-        return
+        return False
     if rollout_id % args.reward_update_interval != 0:
-        return
+        return False
 
     rollout_path = args.save_debug_rollout_data.format(rollout_id=rollout_id)
     if args.reward_update_launcher == "accelerate":
@@ -204,6 +241,7 @@ def _call_reward_update(args, rollout_id: int) -> None:
         update_fn = load_function(args.reward_update_fn_path)
         logger.info("Updating reward model using %s on %s", args.reward_update_fn_path, rollout_path)
         update_fn(args, rollout_id, rollout_path)
+    return True
 
 
 def train(args) -> None:
@@ -272,7 +310,9 @@ def train(args) -> None:
         else:
             ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
 
-        _call_reward_update(args, rollout_id)
+        did_reward_update = _call_reward_update(args, rollout_id)
+        if did_reward_update:
+            reward_eval(args, rollout_id)
 
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             save(rollout_id)
