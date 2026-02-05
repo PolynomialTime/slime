@@ -7,8 +7,9 @@
 #   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
 #   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
 #   SAVE_DIR=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
-#   PROMPT_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
-#   DEMO_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
+#   PROMPT_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
+#   DEMO_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
+#   REWARD_UPDATE_LAUNCHER=accelerate
 #   bash scripts/run-irl.sh
 
 # for rerun the task
@@ -23,7 +24,7 @@ pkill -9 python || true
 
 set -ex
 
-export PYTHONBUFFERED=16
+export PYTHONBUFFERED=1
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
 if [ "$NVLINK_COUNT" -gt 0 ]; then
@@ -78,20 +79,20 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
 
-   --num-rollout 3000
-   --rollout-batch-size 32
-   --n-samples-per-prompt 8
-   --rollout-max-response-len 8192
-   --rollout-temperature 1
+   --num-rollout 20
+   --rollout-batch-size 16
+   --n-samples-per-prompt 1
+   --rollout-max-response-len 120
+   --rollout-temperature 0.8
 
-   --global-batch-size 256
+   --global-batch-size 16
    --balance-data
 )
 
 PPO_ARGS=(
    --advantage-estimator ppo
    --use-kl-loss
-   --kl-loss-coef 0.00
+   --kl-loss-coef 0.01
    --kl-loss-type low_var_kl
    --entropy-coef 0.00
    --eps-clip 0.2
@@ -104,7 +105,7 @@ IRL_ARGS=(
    --reward-demo-prompt-key text
    --reward-demo-answer-key label
    --reward-model-dir reward_model
-   --reward-update-interval 1
+   --reward-update-interval 2
    --reward-update-epochs 1
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
@@ -145,9 +146,9 @@ PERF_ARGS=(
 
 OPTIMIZER_ARGS=(
    --optimizer adam
-   --lr 1e-6
+   --lr 1e-5
    --lr-decay-style constant
-   --weight-decay 0.1
+   --weight-decay 0.01
    --adam-beta1 0.9
    --adam-beta2 0.98
 )
@@ -197,6 +198,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor-num-gpus-per-node ${ACTOR_GPUS} \
    --critic-num-nodes 1 \
    --critic-num-gpus-per-node ${CRITIC_GPUS} \
+   --num-gpus-per-node 4 \
    ${COLOCATE_ARGS[@]} \
    ${ROLLOUT_RESOURCE_ARGS[@]} \
    ${MODEL_ARGS[@]} \
