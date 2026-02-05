@@ -33,6 +33,7 @@ def custom_rm(args, sample):
         return 0.0
 
     base_model = getattr(args, "reward_model_init", None) or args.hf_checkpoint
+    global _TOKENIZER
     if _TOKENIZER is None:
         _TOKENIZER = load_tokenizer(base_model)
     pad_id = _TOKENIZER.pad_token_id
