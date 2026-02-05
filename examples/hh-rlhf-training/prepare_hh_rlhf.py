@@ -6,6 +6,7 @@
 """
 import gzip
 import json
+import os
 import re
 from pathlib import Path
 
@@ -130,6 +131,23 @@ def merge_jsonl_files(input_files, output_file):
     print(f"合并输出: {output_file}")
 
 
+def write_first_n_jsonl(input_file, output_file, max_lines: int):
+    """
+    从 input_file 取前 max_lines 行写到 output_file。
+    """
+    written = 0
+    with open(input_file, "r", encoding="utf-8") as in_f, open(output_file, "w", encoding="utf-8") as out_f:
+        for line in in_f:
+            if not line.strip():
+                continue
+            out_f.write(line)
+            written += 1
+            if written >= max_lines:
+                break
+    print(f"调试子集完成: {written} 条数据")
+    print(f"调试输出: {output_file}")
+
+
 
 def main():
     # 设置路径
@@ -173,6 +191,16 @@ def main():
     for split, files in merge_map.items():
         merged_file = output_dir / f"hh-rlhf-merged-{split}.jsonl"
         merge_jsonl_files(files, merged_file)
+
+    # 生成调试用的小规模 merged train
+    debug_size = int(os.environ.get("DEBUG_MERGE_TRAIN_SIZE", "512"))
+    merged_train = output_dir / "hh-rlhf-merged-train.jsonl"
+    debug_train = output_dir / "hh-rlhf-merged-train-debug.jsonl"
+    if merged_train.exists():
+        print(f"\n{'='*60}")
+        print(f"生成调试用小数据集: {debug_size} 条")
+        print(f"{'='*60}")
+        write_first_n_jsonl(merged_train, debug_train, debug_size)
     
     print(f"\n{'='*60}")
     print("所有数据集转换完成！")
