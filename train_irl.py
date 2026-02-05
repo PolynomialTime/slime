@@ -315,6 +315,9 @@ def train(args) -> None:
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             save(rollout_id)
 
+        if is_updated is True:
+            reward_eval(args, rollout_id)
+
         offload_train()
         if args.offload_rollout:
             ray.get(rollout_manager.onload_weights.remote())
@@ -325,8 +328,7 @@ def train(args) -> None:
         if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):
             ray.get(rollout_manager.eval.remote(rollout_id))
         
-        if is_updated is True:
-            reward_eval(args, rollout_id)
+        
 
     ray.get(rollout_manager.dispose.remote())
 

@@ -79,13 +79,13 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
 
-   --num-rollout 20
-   --rollout-batch-size 16
+   --num-rollout 7
+   --rollout-batch-size 8
    --n-samples-per-prompt 1
-   --rollout-max-response-len 120
+   --rollout-max-response-len 96
    --rollout-temperature 0.8
 
-   --global-batch-size 16
+   --global-batch-size 8
    --balance-data
 )
 

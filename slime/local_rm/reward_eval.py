@@ -87,6 +87,7 @@ def reward_eval(args, rollout_id: int) -> None:
         return
 
     correct = 0
+    pad_id = tokenizer.pad_token_id
     
     with torch.no_grad():
         for i in range(0, total, batch_size):
