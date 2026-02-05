@@ -26,6 +26,11 @@ set -ex
 
 export PYTHONBUFFERED=1
 
+# Reserve GPU 3 for reward update (accelerate), leave training on 0,1,2.
+# Adjust if your hardware indices differ.
+export CUDA_VISIBLE_DEVICES=0,1,2
+export REWARD_UPDATE_ACCELERATE_NUM_PROC=1
+
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
 if [ "$NVLINK_COUNT" -gt 0 ]; then
     HAS_NVLINK=1
@@ -113,6 +118,7 @@ IRL_ARGS=(
    --reward-update-epochs 1
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
+   --reward-update-cuda-visible-devices 3
    --save-debug-rollout-data /mnt/shared-storage-user/wangqianyi/slime/rollout/rollout_{rollout_id}.pt
 )
 

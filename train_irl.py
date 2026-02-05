@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import subprocess
 from argparse import ArgumentParser
 from pathlib import Path
@@ -126,6 +127,12 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         help="Number of processes for accelerate reward update.",
     )
     parser.add_argument(
+        "--reward-update-cuda-visible-devices",
+        type=str,
+        default=None,
+        help="CUDA_VISIBLE_DEVICES for accelerate reward update.",
+    )
+    parser.add_argument(
         "--reward-update-rollout-window",
         type=int,
         default=1,
@@ -236,7 +243,10 @@ def _call_reward_update(args, rollout_id: int) -> bool:
             rollout_path,
         ]
         logger.info("Launching reward update via accelerate: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True)
+        env = os.environ.copy()
+        if args.reward_update_cuda_visible_devices:
+            env["CUDA_VISIBLE_DEVICES"] = args.reward_update_cuda_visible_devices
+        subprocess.run(cmd, check=True, env=env)
     else:
         update_fn = load_function(args.reward_update_fn_path)
         logger.info("Updating reward model using %s on %s", args.reward_update_fn_path, rollout_path)
