@@ -310,10 +310,6 @@ def train(args) -> None:
         else:
             ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
 
-        did_reward_update = _call_reward_update(args, rollout_id)
-        if did_reward_update:
-            reward_eval(args, rollout_id)
-
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             save(rollout_id)
 
@@ -323,6 +319,14 @@ def train(args) -> None:
         actor_model.update_weights()
         if args.offload_rollout:
             ray.get(rollout_manager.onload_kv.remote())
+
+        did_reward_update = _call_reward_update(args, rollout_id)
+        if did_reward_update:
+            if args.offload_rollout:
+                ray.get(rollout_manager.offload.remote())
+            reward_eval(args, rollout_id)
+            if args.offload_rollout:
+                ray.get(rollout_manager.onload_weights.remote())
 
         if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):
             ray.get(rollout_manager.eval.remote(rollout_id))
