@@ -59,10 +59,10 @@ if [[ "$HF_CKPT" == "/path/to/"* ]]; then
 fi
 
 # Resource config
-ACTOR_GPUS=${ACTOR_GPUS:-2}
-CRITIC_GPUS=${CRITIC_GPUS:-2}
-ROLLOUT_GPUS=${ROLLOUT_GPUS:-4}
-USE_COLOCATE=${USE_COLOCATE:-1}
+ACTOR_GPUS=${ACTOR_GPUS:-1}
+CRITIC_GPUS=${CRITIC_GPUS:-1}
+ROLLOUT_GPUS=${ROLLOUT_GPUS:-1}
+USE_COLOCATE=${USE_COLOCATE:-0}
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_CKPT}
@@ -80,12 +80,12 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
 
    --num-rollout 7
-   --rollout-batch-size 8
+   --rollout-batch-size 4
    --n-samples-per-prompt 1
    --rollout-max-response-len 96
    --rollout-temperature 0.8
 
-   --global-batch-size 8
+   --global-batch-size 4
    --balance-data
 )
 
@@ -133,7 +133,7 @@ EVAL_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 2
+   --tensor-model-parallel-size 1
    --sequence-parallel
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
@@ -165,7 +165,7 @@ WANDB_ARGS=(
 )
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 2
+   --rollout-num-gpus-per-engine 1
 )
 
 MISC_ARGS=(

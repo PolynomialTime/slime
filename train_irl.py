@@ -316,7 +316,8 @@ def train(args) -> None:
             save(rollout_id)
 
         if is_updated is True:
-            reward_eval(args, rollout_id)
+            # reward_eval(args, rollout_id)
+            continue
 
         offload_train()
         if args.offload_rollout:
