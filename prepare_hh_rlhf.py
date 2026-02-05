@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 将 hh-rlhf 数据集转换为 slime 训练格式
-格式: {"text": "完整对话历史", "label": "最后一个 Assistant 的回复"}
-注意：slime 框架默认使用 "text" 作为 prompt 字段，"label" 作为标签字段
+train 格式: {"text": "完整对话历史", "label": "最后一个 Assistant 的回复"}
+test 格式: {"text": "对话历史", "chosen": "优选回复", "rejected": "拒绝回复"}
 """
 import gzip
 import json
@@ -81,7 +81,7 @@ def convert_hh_rlhf_to_slime_format(input_file, output_file):
     将 hh-rlhf 格式转换为 slime 格式
     
     hh-rlhf 格式: {"chosen": "...", "rejected": "..."}
-    slime 格式: {"text": "对话历史", "label": "最后的回复"}
+    slime train 格式: {"text": "对话历史", "label": "最后的回复"}
     """
     output_data = []
     skipped = 0
@@ -109,6 +109,52 @@ def convert_hh_rlhf_to_slime_format(input_file, output_file):
     print(f"转换完成: {len(output_data)} 条数据")
     if skipped > 0:
         print(f"跳过: {skipped} 条数据（解析失败）")
+    print(f"输出文件: {output_file}")
+
+
+def convert_hh_rlhf_to_pref_format(input_file, output_file):
+    """
+    将 hh-rlhf 格式转换为偏好格式（用于 test）
+
+    hh-rlhf 格式: {"chosen": "...", "rejected": "..."}
+    test 格式: {"text": "对话历史", "chosen": "优选回复", "rejected": "拒绝回复"}
+    """
+    output_data = []
+    skipped = 0
+    prompt_mismatch = 0
+
+    with gzip.open(input_file, 'rt', encoding='utf-8') as f:
+        for idx, line in enumerate(f):
+            data = json.loads(line)
+
+            # 解析 chosen/rejected 对话
+            prompt_c, answer_c = parse_conversation(data['chosen'])
+            prompt_r, answer_r = parse_conversation(data['rejected'])
+
+            if prompt_c and answer_c and prompt_r and answer_r:
+                prompt_c = prompt_c.strip()
+                prompt_r = prompt_r.strip()
+                if prompt_c != prompt_r:
+                    prompt_mismatch += 1
+                    continue
+                output_data.append({
+                    "text": prompt_c,
+                    "chosen": answer_c,
+                    "rejected": answer_r
+                })
+            else:
+                skipped += 1
+
+    # 保存为 jsonl 格式
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for item in output_data:
+            f.write(json.dumps(item, ensure_ascii=False) + '\n')
+
+    print(f"转换完成: {len(output_data)} 条数据")
+    if skipped > 0:
+        print(f"跳过: {skipped} 条数据（解析失败）")
+    if prompt_mismatch > 0:
+        print(f"跳过: {prompt_mismatch} 条数据（prompt 不一致）")
     print(f"输出文件: {output_file}")
 
 
@@ -170,7 +216,10 @@ def main():
             print(f"\n{'='*60}")
             print(f"处理: {input_file}")
             print(f"{'='*60}")
-            convert_hh_rlhf_to_slime_format(input_file, output_file)
+            if split == "test":
+                convert_hh_rlhf_to_pref_format(input_file, output_file)
+            else:
+                convert_hh_rlhf_to_slime_format(input_file, output_file)
         else:
             print(f"\n跳过 (文件不存在): {input_file}")
 
