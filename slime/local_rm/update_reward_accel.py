@@ -98,9 +98,12 @@ def main():
     demo_samples = _shard_samples(demo_samples, accelerator.process_index, accelerator.num_processes)
     rollout_samples = _shard_samples(rollout_samples, accelerator.process_index, accelerator.num_processes)
 
+    def _cfg(m):
+        return accelerator.unwrap_model(m).config
+
     pad_id = tokenizer.pad_token_id
     rms = RunningMeanStd(device=accelerator.device)
-    c_coef = float(getattr(model.config, "c_coef", 1.0))
+    c_coef = float(getattr(_cfg(model), "c_coef", 1.0))
     c_coef_min = getattr(args, "c_coef_min", 0.1)
     c_coef_max = getattr(args, "c_coef_max", 10.0)
     coef_scale_up = getattr(args, "coef_scale_up", 1.2)
@@ -135,15 +138,16 @@ def main():
 
             with torch.no_grad():
                 rewards_norm = torch.cat([rewards_demo.detach(), rewards_roll.detach()], dim=0)
-                raw = rewards_norm * float(model.config.normalization_constant) + float(model.config.bias)
+                cfg = _cfg(model)
+                raw = rewards_norm * float(cfg.normalization_constant) + float(cfg.bias)
                 raw_all = accelerator.gather(raw)
                 rms.update_from_batch(raw_all)
                 new_bias = float(rms.mean.item())
                 new_std = float(rms.std.item())
                 if new_std < 1e-3:
                     new_std = 1e-3
-                model.config.bias = new_bias
-                model.config.normalization_constant = new_std
+                cfg.bias = new_bias
+                cfg.normalization_constant = new_std
 
             with torch.no_grad():
                 eps_all = accelerator.gather(epsilon.detach())
@@ -155,7 +159,7 @@ def main():
                 elif epsilon_global < lo:
                     c_coef *= coef_scale_down
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
-                model.config.c_coef = float(c_coef)
+                _cfg(model).c_coef = float(c_coef)
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)
