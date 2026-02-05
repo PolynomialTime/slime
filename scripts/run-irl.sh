@@ -104,12 +104,12 @@ IRL_ARGS=(
    --reward-demo-path ${DEMO_DATA}
    --reward-demo-prompt-key text
    --reward-demo-answer-key label
-   --reward-model-dir reward_model
+   --reward-model-dir models/reward_model
    --reward-update-interval 2
    --reward-update-epochs 1
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
-   --save-debug-rollout-data /mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/rollout_{rollout_id}.pt
+   --save-debug-rollout-data /mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/rollout/rollout_{rollout_id}.pt
 )
 
 IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-direct})
