@@ -191,7 +191,7 @@ else
 fi
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 4 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 3 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
@@ -208,7 +208,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor-num-gpus-per-node ${ACTOR_GPUS} \
    --critic-num-nodes 1 \
    --critic-num-gpus-per-node ${CRITIC_GPUS} \
-   --num-gpus-per-node 4 \
+   --num-gpus-per-node 3 \
    ${COLOCATE_ARGS[@]} \
    ${ROLLOUT_RESOURCE_ARGS[@]} \
    ${MODEL_ARGS[@]} \
