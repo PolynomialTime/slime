@@ -7,10 +7,11 @@ from .processors import quantize_params, remove_padding
 from .qwen2 import convert_qwen2_to_hf
 from .qwen3_next import convert_qwen3_next_to_hf
 from .qwen3moe import convert_qwen3moe_to_hf
-try:
-    from .qwen3_vl import convert_qwen3vl_to_hf
-except ModuleNotFoundError:
-    convert_qwen3vl_to_hf = None
+from .qwen3_vl import convert_qwen3vl_to_hf
+# try:
+#     from .qwen3_vl import convert_qwen3vl_to_hf
+# except ModuleNotFoundError:
+#     convert_qwen3vl_to_hf = None
 
 
 # TODO unify w/ `convert_to_hf`
