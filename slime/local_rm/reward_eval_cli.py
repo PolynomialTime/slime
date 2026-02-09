@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 from .reward_eval import reward_eval
+from slime.utils.logging_utils import configure_logger
 
 
 def parse_args():
@@ -14,6 +15,7 @@ def parse_args():
 
 def main():
     cli = parse_args()
+    configure_logger()
     with open(cli.args_json, encoding="utf-8") as f:
         cfg_dict = json.load(f)
     args = SimpleNamespace(**cfg_dict)
