@@ -6,9 +6,11 @@ from types import SimpleNamespace
 import torch
 import torch.optim as optim
 from accelerate import Accelerator
+from tqdm import tqdm
 
 from .data import iter_batches, load_demo_samples, load_rollout_samples
 from .model import RunningMeanStd, get_sequence_rewards, init_reward_model, load_tokenizer
+from slime.utils.logging_utils import configure_logger
 
 
 def _shard_samples(samples: list, process_index: int, num_processes: int) -> list:
@@ -46,6 +48,7 @@ def main():
         cfg_dict = json.load(f)
     args = SimpleNamespace(**cfg_dict)
 
+    configure_logger()
     accelerator = Accelerator()
 
     base_model = args.reward_model_init or args.hf_checkpoint
@@ -110,10 +113,20 @@ def main():
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
 
-    for _ in range(args.reward_update_epochs):
-        for demo_batch, roll_batch in zip(
-            iter_batches(demo_samples, args.reward_update_batch_size),
-            iter_batches(rollout_samples, args.reward_update_batch_size),
+    for _ in tqdm(
+        range(args.reward_update_epochs),
+        desc="reward_update_epoch",
+        leave=False,
+        disable=not accelerator.is_main_process,
+    ):
+        for demo_batch, roll_batch in tqdm(
+            zip(
+                iter_batches(demo_samples, args.reward_update_batch_size),
+                iter_batches(rollout_samples, args.reward_update_batch_size),
+            ),
+            desc="reward_update_batch",
+            leave=False,
+            disable=not accelerator.is_main_process,
         ):
             demo_tokens = [s.tokens for s in demo_batch]
             roll_tokens = [s.tokens for s in roll_batch]
