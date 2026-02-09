@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import torch
 import torch.optim as optim
@@ -113,11 +114,12 @@ def main():
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
 
+    show_tqdm = accelerator.is_main_process and sys.stderr.isatty()
     for _ in tqdm(
         range(args.reward_update_epochs),
         desc="reward_update_epoch",
         leave=False,
-        disable=not accelerator.is_main_process,
+        disable=not show_tqdm,
     ):
         for demo_batch, roll_batch in tqdm(
             zip(
@@ -126,7 +128,7 @@ def main():
             ),
             desc="reward_update_batch",
             leave=False,
-            disable=not accelerator.is_main_process,
+            disable=not show_tqdm,
         ):
             demo_tokens = [s.tokens for s in demo_batch]
             roll_tokens = [s.tokens for s in roll_batch]
