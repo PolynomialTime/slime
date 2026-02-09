@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 
 import torch
@@ -95,7 +94,7 @@ def reward_eval(args, rollout_id: int) -> None:
     
     rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", os.environ.get("SLURM_PROCID", "0"))))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    show_tqdm = sys.stderr.isatty() and (world_size <= 1 or rank == 0)
+    show_tqdm = world_size <= 1 or rank == 0
     with torch.no_grad():
         for i in tqdm(
             range(0, total, batch_size),
