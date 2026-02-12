@@ -98,8 +98,14 @@ def main():
     if not demo_samples or not rollout_samples:
         return
 
+    if accelerator.is_main_process:
+        accelerator.print(f"Loaded {len(demo_samples)} demo samples, {len(rollout_samples)} rollout samples")
+
     demo_samples = _shard_samples(demo_samples, accelerator.process_index, accelerator.num_processes)
     rollout_samples = _shard_samples(rollout_samples, accelerator.process_index, accelerator.num_processes)
+
+    if accelerator.is_main_process:
+        accelerator.print(f"After sharding (process {accelerator.process_index}/{accelerator.num_processes}): {len(demo_samples)} demo samples, {len(rollout_samples)} rollout samples")
 
     def _cfg(m):
         return accelerator.unwrap_model(m).config
@@ -112,6 +118,21 @@ def main():
     coef_scale_up = getattr(args, "coef_scale_up", 1.2)
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
+
+    num_demo_batches = (len(demo_samples) + args.reward_update_batch_size - 1) // args.reward_update_batch_size
+    num_roll_batches = (len(rollout_samples) + args.reward_update_batch_size - 1) // args.reward_update_batch_size
+    num_training_batches = min(num_demo_batches, num_roll_batches)
+
+    if accelerator.is_main_process:
+        accelerator.print(f"Batch size: {args.reward_update_batch_size}")
+        accelerator.print(f"Demo batches: {num_demo_batches}, Rollout batches: {num_roll_batches}")
+        accelerator.print(f"Training iterations per epoch: {num_training_batches}")
+        if num_demo_batches != num_roll_batches:
+            demo_used = num_training_batches * args.reward_update_batch_size
+            roll_used = num_training_batches * args.reward_update_batch_size
+            accelerator.print(f"⚠️  WARNING: Batch count mismatch detected!")
+            accelerator.print(f"   - Demo samples used: ~{demo_used}/{len(demo_samples)} ({100*demo_used/len(demo_samples):.1f}%)")
+            accelerator.print(f"   - Rollout samples used: ~{roll_used}/{len(rollout_samples)} ({100*roll_used/len(rollout_samples):.1f}%)")
 
     for _ in tqdm(
         range(args.reward_update_epochs),
@@ -173,6 +194,9 @@ def main():
                     c_coef *= coef_scale_down
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
                 _cfg(model).c_coef = float(c_coef)
+
+    if accelerator.is_main_process:
+        accelerator.print(f"Reward update completed for rollout {cli.rollout_id}")
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)

@@ -375,7 +375,6 @@ def train(args) -> None:
 
         if is_updated is True:
             _call_reward_eval(args, rollout_id)
-            continue
 
         offload_train()
         if args.offload_rollout:
