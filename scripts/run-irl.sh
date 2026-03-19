@@ -24,11 +24,12 @@ pkill -9 python || true
 
 set -ex
 
-export PYTHONBUFFERED=1
+export PYTHONUNBUFFERED=1
 
-# Reserve GPU 3 for reward update (accelerate), leave training on 0,1,2.
-# Adjust if your hardware indices differ.
-export CUDA_VISIBLE_DEVICES=0,1,2
+# Training uses GPUs 0,1,2; reward update/eval subprocess uses GPU 3.
+# Do NOT set CUDA_VISIBLE_DEVICES here — let subprocesses set it themselves.
+# Ray start below declares 3 GPUs (0,1,2) for training workers.
+# The reward update subprocess overrides CUDA_VISIBLE_DEVICES=3 independently.
 export REWARD_UPDATE_ACCELERATE_NUM_PROC=1
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
@@ -121,6 +122,11 @@ IRL_ARGS=(
    --reward-update-cuda-visible-devices 3
    --reward-eval-cuda-visible-devices 3
    --save-debug-rollout-data /mnt/shared-storage-user/wangqianyi/slime/rollout/rollout_{rollout_id}.pt
+   --win-rate-eval-path /mnt/shared-storage-user/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-test.jsonl
+   --win-rate-eval-prompt-key text
+   --win-rate-eval-max-samples 50
+   --win-rate-eval-gpt4o-model openai/gpt-4o
+   --win-rate-eval-max-tokens 512
 )
 
 IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-direct})
@@ -129,6 +135,9 @@ if [ -n "${REWARD_UPDATE_ACCELERATE_CONFIG}" ]; then
 fi
 if [ -n "${REWARD_UPDATE_ACCELERATE_NUM_PROC}" ]; then
   IRL_ARGS+=(--reward-update-accelerate-num-proc ${REWARD_UPDATE_ACCELERATE_NUM_PROC})
+fi
+if [ -n "${WIN_RATE_OPENROUTER_KEY:-}" ]; then
+  IRL_ARGS+=(--win-rate-eval-openrouter-key "${WIN_RATE_OPENROUTER_KEY}")
 fi
 
 EVAL_ARGS=(

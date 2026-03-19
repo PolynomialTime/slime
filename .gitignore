@@ -198,3 +198,6 @@ models/
 rollout/
 CLAUDE.md
 .claude/*
+
+execute*
+hh*

@@ -166,9 +166,9 @@ def main():
             epsilon = torch.sqrt(torch.mean(delta ** 2))
 
             loss = -(l_old - c_coef * epsilon)
+            optimizer.zero_grad()
             accelerator.backward(loss)
             optimizer.step()
-            optimizer.zero_grad()
 
             with torch.no_grad():
                 rewards_norm = torch.cat([rewards_demo.detach(), rewards_roll.detach()], dim=0)

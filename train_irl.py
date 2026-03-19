@@ -13,6 +13,7 @@ from slime.utils.arguments import parse_args
 from slime.utils.logging_utils import configure_logger, init_tracking
 from slime.utils.misc import load_function, should_run_periodic_action
 from slime.local_rm.reward_eval import reward_eval
+from slime.local_rm.win_rate_eval import win_rate_eval
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,42 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         type=str,
         default=None,
         help="CUDA_VISIBLE_DEVICES for reward eval subprocess.",
+    )
+    parser.add_argument(
+        "--win-rate-eval-path",
+        type=str,
+        default=None,
+        help="Path to win-rate eval JSONL. If not set, win-rate eval is skipped.",
+    )
+    parser.add_argument(
+        "--win-rate-eval-prompt-key",
+        type=str,
+        default="text",
+        help="JSON key for prompt in win-rate eval dataset.",
+    )
+    parser.add_argument(
+        "--win-rate-eval-max-samples",
+        type=int,
+        default=50,
+        help="Max number of samples for win-rate eval.",
+    )
+    parser.add_argument(
+        "--win-rate-eval-openrouter-key",
+        type=str,
+        default=None,
+        help="OpenRouter API key for GPT-4o generation and judging.",
+    )
+    parser.add_argument(
+        "--win-rate-eval-gpt4o-model",
+        type=str,
+        default="openai/gpt-4o",
+        help="OpenRouter model name for GPT-4o (generator and judge).",
+    )
+    parser.add_argument(
+        "--win-rate-eval-max-tokens",
+        type=int,
+        default=512,
+        help="Max tokens for response generation in win-rate eval.",
     )
     return parser
 
@@ -375,6 +412,7 @@ def train(args) -> None:
 
         if is_updated is True:
             _call_reward_eval(args, rollout_id)
+            win_rate_eval(args, rollout_id)
 
         offload_train()
         if args.offload_rollout:
