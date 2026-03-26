@@ -195,6 +195,17 @@ def main():
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
                 _cfg(model).c_coef = float(c_coef)
 
+            if accelerator.is_main_process:
+                accelerator.print(
+                    f"[reward_update] rollout={cli.rollout_id}"
+                    f"  loss={loss.item():.4f}"
+                    f"  irl_margin={l_old.item():.4f}"
+                    f"  r_demo={rewards_demo.mean().item():.4f}"
+                    f"  r_roll={rewards_roll.mean().item():.4f}"
+                    f"  epsilon={epsilon_global:.4f}"
+                    f"  c_coef={c_coef:.4f}"
+                )
+
     if accelerator.is_main_process:
         accelerator.print(f"Reward update completed for rollout {cli.rollout_id}")
 

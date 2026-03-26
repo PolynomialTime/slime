@@ -1,9 +1,12 @@
+import logging
 import os
 import time
 
 import torch
 
 from .model import get_sequence_rewards, init_reward_model, load_tokenizer
+
+logger = logging.getLogger(__name__)
 
 _MODEL = None
 _TOKENIZER = None
@@ -24,6 +27,7 @@ def _load_model(args):
         _MODEL = init_reward_model(base_model, model_path)
         _MODEL.eval()
         _MODEL_MTIME = mtime
+        logger.info("[custom_rm] loaded reward model from %s (mtime=%s)", model_path, mtime)
     return _MODEL
 
 
