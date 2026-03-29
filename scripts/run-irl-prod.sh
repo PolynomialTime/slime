@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Generic IRL training script (PPO -> reward update -> PPO ...)
+# Production IRL training script — 4×H200, Qwen3-1.7B, hh-rlhf 86k
 # Usage:
 #   MODEL_SH=scripts/models/qwen3-1.7B.sh \
-#   HF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base \
-#   REF_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
-#   ACTOR_CKPT=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/qwen3-1.7b-base_torch_dist \
-#   SAVE_DIR=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/models/save_dir \
-#   PROMPT_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
-#   DEMO_DATA=/mnt/shared-storage-user/ma4agi-gpu/wangqianyi/slime/hh-rlhf-processed/hh-rlhf-merged-train-debug.jsonl \
-#   REWARD_UPDATE_LAUNCHER=accelerate
-#   bash scripts/run-irl.sh
+#   HF_CKPT=$SLIME_ROOT/models/qwen3-1.7b-base \
+#   REF_CKPT=$SLIME_ROOT/models/qwen3-1.7b-base_torch_dist \
+#   ACTOR_CKPT=$SLIME_ROOT/models/qwen3-1.7b-base_torch_dist \
+#   SAVE_DIR=$SLIME_ROOT/models/save_dir \
+#   PROMPT_DATA=$SLIME_ROOT/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
+#   DEMO_DATA=$SLIME_ROOT/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
+#   REWARD_UPDATE_LAUNCHER=accelerate \
+#   bash scripts/run-irl-prod.sh
 
 # for rerun the task
 pkill -9 sglang || true
@@ -27,9 +27,6 @@ set -ex
 export PYTHONUNBUFFERED=1
 
 # Training uses GPUs 0,1,2; reward update/eval subprocess uses GPU 3.
-# Do NOT set CUDA_VISIBLE_DEVICES here — let subprocesses set it themselves.
-# Ray start below declares 3 GPUs (0,1,2) for training workers.
-# The reward update subprocess overrides CUDA_VISIBLE_DEVICES=3 independently.
 export REWARD_UPDATE_ACCELERATE_NUM_PROC=1
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
@@ -76,7 +73,7 @@ CKPT_ARGS=(
    --ref-load ${REF_CKPT}
    --load ${ACTOR_CKPT}
    --save ${SAVE_DIR}
-   --save-interval 20
+   --save-interval 50
 )
 
 ROLLOUT_ARGS=(
@@ -86,20 +83,20 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
 
-   --num-rollout 7
-   --rollout-batch-size 4
+   --num-rollout 300
+   --rollout-batch-size 128
    --n-samples-per-prompt 1
-   --rollout-max-response-len 96
+   --rollout-max-response-len 256
    --rollout-temperature 0.8
 
-   --global-batch-size 4
+   --global-batch-size 64
    --balance-data
 )
 
 PPO_ARGS=(
    --advantage-estimator ppo
    --use-kl-loss
-   --kl-loss-coef 0.01
+   --kl-loss-coef 0.02
    --kl-loss-type low_var_kl
    --entropy-coef 0.00
    --eps-clip 0.2
@@ -115,11 +112,13 @@ IRL_ARGS=(
    --reward-eval-prompt-key text
    --reward-eval-chosen-key chosen
    --reward-eval-rejected-key rejected
+   --reward-eval-max-samples 500
    --reward-model-dir ${SLIME_ROOT}/models/reward_model
    --reward-update-interval 1
-   --reward-update-epochs 1
+   --reward-update-epochs 3
    --reward-update-batch-size 8
    --reward-update-lr 1e-5
+   --reward-update-rollout-window 3
    --reward-update-cuda-visible-devices 3
    --reward-eval-cuda-visible-devices 3
    --save-debug-rollout-data ${SLIME_ROOT}/rollout/rollout_{rollout_id}.pt
@@ -162,12 +161,12 @@ PERF_ARGS=(
    --recompute-num-layers 1
 
    --use-dynamic-batch-size
-   --max-tokens-per-gpu 4608
+   --max-tokens-per-gpu 8192
 )
 
 OPTIMIZER_ARGS=(
    --optimizer adam
-   --lr 1e-5
+   --lr 5e-6
    --lr-decay-style constant
    --weight-decay 0.01
    --adam-beta1 0.9
@@ -175,10 +174,9 @@ OPTIMIZER_ARGS=(
 )
 
 WANDB_ARGS=(
-   #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group irl-run
-   # --wandb-key ${WANDB_KEY}
+   --use-tensorboard
+   --tb-project-name slime-irl
+   --tb-experiment-name prod
 )
 
 SGLANG_ARGS=(

@@ -1,9 +1,12 @@
+import logging
 import os
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
+logger = logging.getLogger(__name__)
 
 from .data import iter_batches, load_demo_samples, load_rollout_samples
 from .model import RunningMeanStd, get_sequence_rewards, init_reward_model, load_tokenizer
@@ -94,6 +97,14 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
     coef_scale_up = getattr(args, "coef_scale_up", 1.2)
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
+
+    num_demo_batches = (len(demo_samples) + args.reward_update_batch_size - 1) // args.reward_update_batch_size
+    num_roll_batches = (len(rollout_samples) + args.reward_update_batch_size - 1) // args.reward_update_batch_size
+    if num_demo_batches != num_roll_batches:
+        logger.warning(
+            "Batch count mismatch: demo=%d batches, rollout=%d batches — shorter side will truncate",
+            num_demo_batches, num_roll_batches,
+        )
 
     pad_id = tokenizer.pad_token_id
     for _ in range(args.reward_update_epochs):

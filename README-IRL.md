@@ -5,7 +5,7 @@
 训练前导出以下路径变量（建议写入 `.env` 或直接 `export`）：
 
 ```bash
-export SLIME_ROOT=/mnt/shared-storage-user/wangqianyi/slime
+export SLIME_ROOT=/mnt/shared-storage-gpfs2/wangqianyi2/slime
 
 export HF_CKPT=$SLIME_ROOT/models/qwen3-1.7b-base          # HF 格式原始权重
 export REF_CKPT=$SLIME_ROOT/models/qwen3-1.7b-base_torch_dist  # 参考模型（KL loss）

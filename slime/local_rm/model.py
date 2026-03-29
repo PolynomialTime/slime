@@ -44,8 +44,9 @@ class ScalarModel(PreTrainedModel):
             config.base_model,
             config=self.config.base_config,
             trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
         )
-        self.scalar_head = nn.Linear(self.config.hidden_size, 1)
+        self.scalar_head = nn.Linear(self.config.hidden_size, 1, dtype=torch.bfloat16)
         nn.init.normal_(self.scalar_head.weight, std=1 / (self.config.hidden_size + 1) ** 0.5)
         nn.init.constant_(self.scalar_head.bias, 0.0)
 
@@ -102,7 +103,7 @@ def load_tokenizer(model_name_or_path: str):
 
 def init_reward_model(base_model: str, reward_model_path: str | None):
     if reward_model_path:
-        return ScalarModel.from_pretrained(reward_model_path)
+        return ScalarModel.from_pretrained(reward_model_path, torch_dtype=torch.bfloat16)
     base_config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
     base_config.output_hidden_states = True
     cfg = ScalarModelConfig(
@@ -150,6 +151,8 @@ def tokenize_prompt_answer(
     apply_chat_template_kwargs: dict | None = None,
 ) -> DemoSample:
     if apply_chat_template:
+        if isinstance(prompt, str):
+            prompt = [{"role": "user", "content": prompt}]
         prompt_text = tokenizer.apply_chat_template(
             prompt,
             tokenize=False,

@@ -26,6 +26,8 @@ def _load_model(args):
         _TOKENIZER = load_tokenizer(base_model)
         _MODEL = init_reward_model(base_model, model_path)
         _MODEL.eval()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        _MODEL.to(device)
         _MODEL_MTIME = mtime
         logger.info("[custom_rm] loaded reward model from %s (mtime=%s)", model_path, mtime)
     return _MODEL
@@ -42,7 +44,6 @@ def custom_rm(args, sample):
         _TOKENIZER = load_tokenizer(base_model)
     pad_id = _TOKENIZER.pad_token_id
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
     tokens = sample.tokens
     if not tokens:

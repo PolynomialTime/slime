@@ -125,3 +125,8 @@ def reward_eval(args, rollout_id: int) -> None:
         acc,
         eval_path,
     )
+
+    out_path = reward_dir / f"reward_eval_rollout_{rollout_id}.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"rollout_id": rollout_id, "accuracy": acc, "correct": correct, "total": total}, f)
+    logger.info("reward_eval: saved results to %s", out_path)

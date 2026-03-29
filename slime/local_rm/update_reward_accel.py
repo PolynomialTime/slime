@@ -60,6 +60,7 @@ def main():
     # Always start reward model from base weights each update
     model = init_reward_model(base_model, None)
     model.config.c_coef = float(getattr(args, "c_coef_init", 1.0))
+    model.train()
 
     # Old model is the previous reward checkpoint (if exists)
     old_model = init_reward_model(base_model, str(model_path) if model_path.exists() else None)
