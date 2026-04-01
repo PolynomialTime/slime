@@ -9,7 +9,7 @@ from accelerate import Accelerator
 from tqdm import tqdm
 
 from .data import iter_batches, load_demo_samples, load_rollout_samples
-from .model import RunningMeanStd, get_sequence_rewards, init_reward_model, load_tokenizer
+from .model import RunningMeanStd, get_sequence_rewards, init_reward_model, load_tokenizer, tokenize_prompt_answer
 from slime.utils.logging_utils import configure_logger
 
 
@@ -32,6 +32,62 @@ def _atomic_save(model, save_dir: Path) -> None:
     if save_dir.exists():
         save_dir.rmdir()
     tmp_dir.rename(save_dir)
+
+
+def _iter_jsonl(path: str):
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            yield json.loads(line)
+
+
+def _load_eval_data(args, tokenizer):
+    """Preload eval chosen/rejected token pairs."""
+    eval_path = getattr(args, "reward_eval_path", None) or getattr(args, "reward_demo_path", None)
+    if not eval_path:
+        return [], []
+    prompt_key = getattr(args, "reward_eval_prompt_key", None) or getattr(args, "reward_demo_prompt_key", "text")
+    chosen_key = getattr(args, "reward_eval_chosen_key", "chosen")
+    rejected_key = getattr(args, "reward_eval_rejected_key", "rejected")
+    max_samples = getattr(args, "reward_eval_max_samples", None)
+    apply_ct = getattr(args, "apply_chat_template", False)
+    apply_ct_kwargs = getattr(args, "apply_chat_template_kwargs", None)
+
+    chosen_tokens, rejected_tokens = [], []
+    total = 0
+    for item in _iter_jsonl(eval_path):
+        if max_samples is not None and total >= max_samples:
+            break
+        if prompt_key not in item or chosen_key not in item or rejected_key not in item:
+            continue
+        c = tokenize_prompt_answer(tokenizer, item[prompt_key], item[chosen_key], apply_ct, apply_ct_kwargs)
+        r = tokenize_prompt_answer(tokenizer, item[prompt_key], item[rejected_key], apply_ct, apply_ct_kwargs)
+        if c.response_length <= 0 or r.response_length <= 0:
+            continue
+        chosen_tokens.append(c.tokens)
+        rejected_tokens.append(r.tokens)
+        total += 1
+    return chosen_tokens, rejected_tokens
+
+
+def _run_inline_eval(model, chosen_tokens, rejected_tokens, pad_id, device, batch_size=8):
+    """Run chosen vs rejected eval on current model, return accuracy."""
+    if not chosen_tokens:
+        return -1.0
+    correct = 0
+    total = len(chosen_tokens)
+    model.eval()
+    with torch.no_grad():
+        for i in range(0, total, batch_size):
+            c_batch = chosen_tokens[i : i + batch_size]
+            r_batch = rejected_tokens[i : i + batch_size]
+            c_scores = get_sequence_rewards(model, c_batch, pad_id, device)
+            r_scores = get_sequence_rewards(model, r_batch, pad_id, device)
+            correct += (c_scores > r_scores).sum().item()
+    model.train()
+    return correct / total
 
 
 def parse_args():
@@ -102,6 +158,11 @@ def main():
     if accelerator.is_main_process:
         accelerator.print(f"Loaded {len(demo_samples)} demo samples, {len(rollout_samples)} rollout samples")
 
+    # Preload eval data
+    eval_chosen, eval_rejected = _load_eval_data(args, tokenizer)
+    if accelerator.is_main_process:
+        accelerator.print(f"Loaded {len(eval_chosen)} eval pairs for inline eval")
+
     demo_samples = _shard_samples(demo_samples, accelerator.process_index, accelerator.num_processes)
     rollout_samples = _shard_samples(rollout_samples, accelerator.process_index, accelerator.num_processes)
 
@@ -135,7 +196,12 @@ def main():
             accelerator.print(f"   - Demo samples used: ~{demo_used}/{len(demo_samples)} ({100*demo_used/len(demo_samples):.1f}%)")
             accelerator.print(f"   - Rollout samples used: ~{roll_used}/{len(rollout_samples)} ({100*roll_used/len(rollout_samples):.1f}%)")
 
-    for _ in tqdm(
+    # Eval every N batches
+    eval_interval = max(1, num_training_batches // 10)  # ~10 evals per epoch
+    eval_results = []
+    global_batch_idx = 0
+
+    for epoch in tqdm(
         range(args.reward_update_epochs),
         desc="reward_update_epoch",
         leave=False,
@@ -196,9 +262,26 @@ def main():
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
                 _cfg(model).c_coef = float(c_coef)
 
-            if accelerator.is_main_process:
+            global_batch_idx += 1
+
+            # Inline eval every eval_interval batches
+            if accelerator.is_main_process and eval_chosen and global_batch_idx % eval_interval == 0:
+                unwrapped = accelerator.unwrap_model(model)
+                acc = _run_inline_eval(unwrapped, eval_chosen, eval_rejected, pad_id, accelerator.device)
+                eval_results.append({"batch": global_batch_idx, "accuracy": acc})
+                accelerator.print(
+                    f"[reward_eval] batch={global_batch_idx}"
+                    f"  acc={acc:.4f}"
+                    f"  loss={loss.item():.4f}"
+                    f"  irl_margin={l_old.item():.4f}"
+                    f"  epsilon={epsilon_global:.4f}"
+                    f"  c_coef={c_coef:.4f}"
+                )
+
+            elif accelerator.is_main_process and global_batch_idx % 100 == 0:
                 accelerator.print(
                     f"[reward_update] rollout={cli.rollout_id}"
+                    f"  batch={global_batch_idx}"
                     f"  loss={loss.item():.4f}"
                     f"  irl_margin={l_old.item():.4f}"
                     f"  r_demo={rewards_demo.mean().item():.4f}"
@@ -206,6 +289,13 @@ def main():
                     f"  epsilon={epsilon_global:.4f}"
                     f"  c_coef={c_coef:.4f}"
                 )
+
+    # Final eval
+    if accelerator.is_main_process and eval_chosen:
+        unwrapped = accelerator.unwrap_model(model)
+        acc = _run_inline_eval(unwrapped, eval_chosen, eval_rejected, pad_id, accelerator.device)
+        eval_results.append({"batch": global_batch_idx, "accuracy": acc})
+        accelerator.print(f"[reward_eval_final] batch={global_batch_idx} acc={acc:.4f}")
 
     if accelerator.is_main_process:
         accelerator.print(f"Reward update completed for rollout {cli.rollout_id}")
@@ -216,6 +306,15 @@ def main():
         step_dir.mkdir(parents=True, exist_ok=True)
         unwrapped.save_pretrained(step_dir, safe_serialization=False)
         _atomic_save(unwrapped, model_path)
+
+        # Save eval results
+        eval_out = reward_dir / f"reward_eval_rollout_{cli.rollout_id}.json"
+        final_acc = eval_results[-1]["accuracy"] if eval_results else -1
+        eval_out.write_text(json.dumps({
+            "rollout_id": cli.rollout_id,
+            "accuracy": final_acc,
+            "eval_curve": eval_results,
+        }, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

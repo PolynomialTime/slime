@@ -1,9 +1,8 @@
 #!/bin/bash
 
-# PPO Phase — 4×GPU, no reward update
-# Called by run-full-pipeline-job.sh for each round
+# SFT training script — 4×H200, Qwen3-1.7B, hh-rlhf 10k samples, 2 epochs
 
-# kill previous processes
+# for rerun the task
 pkill -9 sglang || true
 sleep 3
 ray stop --force || true
@@ -23,72 +22,51 @@ if [ "$NVLINK_COUNT" -gt 0 ]; then
 else
     HAS_NVLINK=0
 fi
+echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
+# Model args
 if [ -n "${MODEL_SH}" ]; then
   source "${MODEL_SH}"
 fi
 if [ -z "${MODEL_ARGS+x}" ]; then
-  echo "MODEL_ARGS not set."
+  echo "MODEL_ARGS not set. Provide MODEL_SH=... to source a model config."
   exit 1
 fi
 
+# Required paths
 HF_CKPT=${HF_CKPT:-"/path/to/hf_ckpt"}
-REF_CKPT=${REF_CKPT:-"/path/to/ref_ckpt"}
+ACTOR_CKPT=${ACTOR_CKPT:-"/path/to/actor_ckpt"}
 SAVE_DIR=${SAVE_DIR:-"/path/to/save_dir"}
-PROMPT_DATA=${PROMPT_DATA:-"/path/to/prompt.jsonl"}
-DEMO_DATA=${DEMO_DATA:-"/path/to/demo.jsonl"}
-SLIME_ROOT=${SLIME_ROOT:-$(dirname "$SCRIPT_DIR")}
-NUM_ROLLOUT=${NUM_ROLLOUT:-336}
+SFT_DATA=${SFT_DATA:-"/path/to/sft_data.jsonl"}
 
 if [[ "$HF_CKPT" == "/path/to/"* ]]; then
-  echo "Please set required env vars."
+  echo "Please set HF_CKPT/ACTOR_CKPT/SAVE_DIR/SFT_DATA."
   exit 1
 fi
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_CKPT}
-   --ref-load ${REF_CKPT}
-   --no-load-optim
-   --no-load-rng
+   --ref-load ${ACTOR_CKPT}
+   --load ${SAVE_DIR}
    --save ${SAVE_DIR}
-   --critic-save /tmp/critic_ckpt
-   --save-interval 999
+   --save-interval 1000
 )
 
-ROLLOUT_ARGS=(
-   --prompt-data ${PROMPT_DATA}
-   --input-key text
-   --label-key label
-   --apply-chat-template
+SFT_ARGS=(
+   --rollout-function-path slime.rollout.sft_rollout.generate_rollout
+   --prompt-data ${SFT_DATA}
+   --input-key messages
    --rollout-shuffle
-
-   --num-rollout ${NUM_ROLLOUT}
-   --rollout-batch-size 128
-   --n-samples-per-prompt 1
-   --rollout-max-response-len 256
-   --rollout-temperature 0.8
-
+   --num-epoch 2
+   --rollout-batch-size 64
    --global-batch-size 64
-   --balance-data
-)
 
-PPO_ARGS=(
-   --advantage-estimator ppo
-   --use-kl-loss
-   --kl-loss-coef 0.05
-   --kl-loss-type low_var_kl
-   --entropy-coef 0.00
-   --eps-clip 0.2
-   --eps-clip-high 0.28
-)
-
-IRL_ARGS=(
-   --custom-rm-path slime.local_rm.custom_rm.custom_rm
-   --reward-model-dir ${SLIME_ROOT}/models/reward_model
-   --reward-update-interval 999999
-   --save-debug-rollout-data ${SLIME_ROOT}/rollout/rollout_{rollout_id}.pt
+   --loss-type sft_loss
+   --calculate-per-token-loss
+   --disable-compute-advantages-and-returns
+   --debug-train-only
 )
 
 PERF_ARGS=(
@@ -109,23 +87,19 @@ PERF_ARGS=(
 
 OPTIMIZER_ARGS=(
    --optimizer adam
-   --lr 5e-6
-   --lr-decay-style constant
-   --weight-decay 0.01
+   --lr 1e-5
+   --lr-decay-style cosine
+   --min-lr 1e-6
+   --lr-warmup-fraction 0.1
+   --weight-decay 0.1
    --adam-beta1 0.9
-   --adam-beta2 0.98
+   --adam-beta2 0.95
 )
-
-TB_EXP_NAME=${TB_EXP_NAME:-prod}
 
 WANDB_ARGS=(
    --use-tensorboard
-   --tb-project-name slime-irl
-   --tb-experiment-name ${TB_EXP_NAME}
-)
-
-SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 1
+   --tb-project-name slime-sft
+   --tb-experiment-name qwen3-1.7b-sft
 )
 
 MISC_ARGS=(
@@ -136,10 +110,8 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-# 4 GPUs for PPO
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-# Save real CUDA devices before Ray overrides them (for custom_rm to use GPU 3)
-export _REAL_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+export no_proxy="127.0.0.1,${MASTER_ADDR}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 4 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 RUNTIME_ENV_JSON="{
@@ -147,26 +119,19 @@ RUNTIME_ENV_JSON="{
     \"PYTHONPATH\": \"/root/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
-    \"_REAL_CUDA_VISIBLE_DEVICES\": \"${_REAL_CUDA_VISIBLE_DEVICES}\"
+    \"PYTORCH_CUDA_ALLOC_CONF\": \"expandable_segments:True\"
   }
 }"
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
-   -- python3 train_irl.py \
+   -- python3 train_async.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 1 \
-   --critic-num-nodes 1 \
-   --critic-num-gpus-per-node 1 \
-   --num-gpus-per-node 4 \
-   --rollout-num-gpus 1 \
+   --actor-num-gpus-per-node 4 \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
-   ${ROLLOUT_ARGS[@]} \
+   ${SFT_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
-   ${PPO_ARGS[@]} \
-   ${IRL_ARGS[@]} \
    ${WANDB_ARGS[@]} \
    ${PERF_ARGS[@]} \
-   ${SGLANG_ARGS[@]} \
    ${MISC_ARGS[@]}

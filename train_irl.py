@@ -241,7 +241,7 @@ def _call_reward_update(args, rollout_id: int) -> bool:
         return False
     if args.reward_update_interval is None or args.reward_update_interval <= 0:
         return False
-    if rollout_id % args.reward_update_interval != 0:
+    if (rollout_id + 1) % args.reward_update_interval != 0:
         return False
 
     rollout_path = args.save_debug_rollout_data.format(rollout_id=rollout_id)
@@ -269,6 +269,12 @@ def _call_reward_update(args, rollout_id: int) -> bool:
             "apply_chat_template_kwargs": args.apply_chat_template_kwargs,
             "save_debug_rollout_data": args.save_debug_rollout_data,
             "reward_update_rollout_window": args.reward_update_rollout_window,
+            "reward_eval_path": args.reward_eval_path,
+            "reward_eval_prompt_key": args.reward_eval_prompt_key,
+            "reward_eval_chosen_key": args.reward_eval_chosen_key,
+            "reward_eval_rejected_key": args.reward_eval_rejected_key,
+            "reward_eval_max_samples": args.reward_eval_max_samples,
+            "reward_eval_batch_size": args.reward_eval_batch_size,
         }
         args_json_path.write_text(json.dumps(reward_args, ensure_ascii=False, indent=2), encoding="utf-8")
         cmd = ["accelerate", "launch"]

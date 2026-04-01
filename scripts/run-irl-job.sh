@@ -11,10 +11,14 @@ rm -rf $SLIME/rollout
 rm -rf $SLIME/tensorboard_log
 rm -rf $SLIME/eval
 
+# SFT checkpoint 路径（需先跑 run-sft-job.sh 生成）
+SFT_CKPT=$SLIME/models/sft_checkpoint
+SFT_HF=$SLIME/models/sft_checkpoint_hf
+
 MODEL_SH=scripts/models/qwen3-1.7B.sh \
-HF_CKPT=$SLIME/models/qwen3-1.7b-base \
-REF_CKPT=$SLIME/models/qwen3-1.7b-base_torch_dist \
-ACTOR_CKPT=$SLIME/models/qwen3-1.7b-base_torch_dist \
+HF_CKPT=$SFT_HF \
+REF_CKPT=$SFT_CKPT \
+ACTOR_CKPT=$SFT_CKPT \
 SAVE_DIR=$SLIME/models/save_dir \
 PROMPT_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
 DEMO_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \

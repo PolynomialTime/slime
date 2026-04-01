@@ -106,11 +106,12 @@ async def run(args):
 
     logger.info("Evaluating %d pairs with model=%s", n, args.model)
 
-    api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+    api_key = args.api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        raise ValueError("Provide --api-key or set OPENAI_API_KEY env var")
+        raise ValueError("Provide --api-key or set OPENAI_API_KEY/OPENROUTER_API_KEY env var")
 
-    client = AsyncOpenAI(api_key=api_key)
+    base_url = args.base_url or os.environ.get("OPENAI_BASE_URL") or None
+    client = AsyncOpenAI(api_key=api_key, **({"base_url": base_url} if base_url else {}))
     semaphore = asyncio.Semaphore(args.concurrency)
 
     async def eval_one(i):
@@ -180,7 +181,8 @@ def main():
     parser.add_argument("--outputs-a", required=True, help="JSONL from model A")
     parser.add_argument("--outputs-b", required=True, help="JSONL from model B")
     parser.add_argument("--output", required=True, help="Output winrate JSON path")
-    parser.add_argument("--api-key", default=None, help="OpenAI API key (or OPENAI_API_KEY env)")
+    parser.add_argument("--api-key", default=None, help="OpenAI/OpenRouter API key")
+    parser.add_argument("--base-url", default=None, help="API base URL (e.g. https://openrouter.ai/api/v1)")
     parser.add_argument("--model", default="gpt-4o")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=16, help="Max concurrent API calls")
