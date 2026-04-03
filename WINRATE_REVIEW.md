@@ -2,12 +2,12 @@
 
 ## 1. 结论摘要
 
-当前仓库里和 `winrate` 相关的主要问题，不是单点 bug，而是四条链路同时失真：
+当前仓库里和 `winrate` 相关的主要问题，不是单点 bug，而是四条链路存在关键断点：
 
-1. `winrate` 评测脚本本身大概率坏了，现有结果基本不能信。
-2. 7 个 round 的 PPO 没有累计上一轮 policy，而是每轮从 SFT 重新开始。
-3. `HH-RLHF` 数据被保存成字符串后，又在训练和评测时被当成单轮 user message 套 chat template，多轮对话结构被破坏。
-4. reward update 的目标、采样方式和长度惩罚共同把策略往“礼貌废话、无意义追问、重复句、拖长度”方向推。
+1. `winrate` parser 还不可靠，现有 judge 结果依然不能直接信。
+2. full pipeline 的 actor 连续加载在当前 HEAD 已经补上，但仍需要一次实跑验证确认 round 间确实连续。
+3. `HH-RLHF` 数据在仓库代码里仍是 `text -> 单轮 user message`，多轮对话结构没有真正落到代码主链路。
+4. reward update 虽然在 prod 路径上修了一部分，但 round 1 无 RM、长度惩罚、generic 路径分叉这些问题还在。
 
 如果以 `icml.pdf` 的 bi-level IRL 目标为准，真正优先要修的不是“换方法”，而是把实现重新拉回这三个条件：
 
@@ -15,13 +15,13 @@
 - `r_theta` 必须连续 warm-start，才能让 `epsilon` 保持小步变化
 - reward / policy 必须真正交替，而不是 reward 永远滞后一轮
 
-基于现有 `eval/outputs_*.jsonl` 的静态统计，policy 输出也没有体现“逐轮变好”：
+基于当前 `eval/outputs_*.jsonl` 的静态统计，policy 输出仍没有体现“逐轮变好”：
 
 - `I'm not sure` 出现率：SFT baseline `4.2%`，`r3` `10.8%`，`r6` `11.0%`
 - 重复句样本占比：SFT baseline `9.7%`，`r3` `25.0%`
 - `eval/winrate_r1_vs_sft.json`、`eval/winrate_r1_vs_gpt4o.json` 等结果全部是 `200/200 ties`
 
-因此当前最重要的工作顺序不是调 PPO 超参，而是：
+因此当前最重要的工作顺序仍然不是调 PPO 超参，而是：
 
 1. 修评测
 2. 修 round 累积训练
@@ -59,10 +59,10 @@
 3. `scripts/eval_generate_sglang.py` 已经支持透传 `apply_chat_template_kwargs`
 4. `slime/local_rm/update_reward_accel.py` 已经加入 `random.shuffle(...)`，并把 reward 产物改成按 round 命名
 
-但当前最关键的几个问题仍然没有真正解决：
+但当前最关键的几个问题里，已经有一项得到实质修复，其余问题仍然存在：
 
-1. policy 连续训练表面上修了，实际上还没修透。`run-full-pipeline-job.sh` 虽然逐轮更新了 `HF_CKPT`，但 `run-irl-prod.sh` 仍然没有传 `--load`；而在这个项目里，当 `--load` 缺失时，训练会从 `--ref-load` 初始化，见 `slime/utils/arguments.py:683`。你现在仍把 `REF_CKPT` 固定在 SFT，所以 actor 还是每轮从 SFT 起步。
-2. `eval_winrate.py` 不再是“只看首词”，但新的 fallback 仍会系统性误判。普通英文里的冠词 `a` 会被误判成选择 A，而 `"Between A and B, A is better."` 这类明确判决又会被吞成 `Tie`。
+1. actor 连续加载这项在当前 HEAD 已经补上了。`run-full-pipeline-job.sh` 现在传 `ACTOR_LOAD=$PREV_SAVE_DIR`，`run-irl-prod.sh` 也会在目录存在时追加 `--load ${ACTOR_LOAD}`。这解决了之前“每轮从 SFT 起步”的核心断点，但还需要一轮真实训练来确认行为与预期一致。
+2. `eval_winrate.py` 不再是“只看首词”，但 parser 现在偏保守，仍会把很多明确胜负吞成 `Tie`。例如 `"Between A and B, A is better."`、`"My answer: B"` 目前都解析不出来。
 3. 多轮对话 schema 在仓库代码里仍没有真正切到 `messages`。本地仓库也没有 `hh-rlhf-processed/` 产物，无法验证你线上数据是否已经另行转换；从代码本身看，默认链路仍是字符串 `text -> 单条 user message`。
 4. round 1 前仍没有 reward bootstrap。`custom_rm` 在 `reward_model/latest` 不存在时仍返回 `0.0`，而 full pipeline 还是先 PPO、后 reward update。
 5. generic IRL 链路还停留在旧语义：`scripts/run-irl.sh` 仍默认 `direct` launcher，而 `slime/local_rm/update_reward.py` 依旧每轮从 base model 重置 RM。
@@ -280,34 +280,34 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 3. 解析失败单独记成 `parse_error`
 4. 修完后再拿现有 `outputs_policy_r*` 全量重跑一遍
 
-## P0-2. full pipeline 表面上传递了 `CURRENT_HF_CKPT`，但 actor 仍没有真正连续训练
+## P0-2. actor 连续加载在当前 HEAD 已补上，但需要一次实跑确认 round 间确实连续
 
 位置：
 
-- `scripts/run-full-pipeline-job.sh:127`
-- `scripts/run-full-pipeline-job.sh:141`
-- `scripts/run-irl-prod.sh:50`
-- `slime/utils/arguments.py:683`
+- `scripts/run-full-pipeline-job.sh:129`
+- `scripts/run-full-pipeline-job.sh:150`
+- `scripts/run-irl-prod.sh:40`
+- `scripts/run-irl-prod.sh:61`
 
 现状：
 
-- `run-full-pipeline-job.sh` 现在会把 `CURRENT_HF_CKPT` 逐轮更新到 `policy_r{N}_hf`
-- 但 `run-irl-prod.sh` 依旧没有传 `--load`
-- 在这个项目里，`--load` 缺失时，会用 `--ref-load` 作为训练初始 checkpoint
-- 你当前仍把 `REF_CKPT` 固定为 SFT checkpoint
+- `run-full-pipeline-job.sh` 现在会把上一轮 torch-dist checkpoint 通过 `ACTOR_LOAD=$PREV_SAVE_DIR` 传给下一轮
+- `run-irl-prod.sh` 也会在目录存在时显式追加 `--load ${ACTOR_LOAD}`
+- 因此 actor state 已经不再只依赖 `--ref-load` / SFT 初始化
+- 当前剩下的问题不是“没接上”，而是还没有一次实跑证据证明 round 间真的按预期连续
 
-为什么严重：
+为什么重要：
 
-- 这意味着 actor 还是会从 SFT 起步，而不是从上一轮 policy 接着学
-- `CURRENT_HF_CKPT` 目前没有真正接管 actor state
-- 这直接破坏了 `icml.pdf` 里 surrogate 的 `pi_old` 语义
+- 这是 `icml.pdf` 里 `pi_old` 语义成立的必要条件
+- 这项如果不通，逐轮提升就无从谈起
+- 现在代码路径已经打通，优先级从“实现缺失”降到了“需要验证”
 
 建议：
 
-1. 下一轮 actor 必须 `--load` 上一轮 policy checkpoint
-2. `REF_CKPT` 可以继续固定为 SFT，用作 KL anchor
-3. 当前 `HF_CKPT=$CURRENT_HF_CKPT` 可以保留，但不能替代 `--load`
-4. 修完后再谈“逐轮提升”，否则 `r1..r7` 仍不是真正的连续优化
+1. 保留当前 `ACTOR_LOAD -> --load` 方案
+2. `REF_CKPT` 继续固定为 SFT，作为 KL anchor
+3. 下一次实跑时重点验证 round2 是否真正从 round1 actor 继续训练
+4. 这项验证一旦通过，就可以从主问题清单里移除
 
 ## P0-3. 多轮对话被错误地当成单轮 user message 套 chat template
 
