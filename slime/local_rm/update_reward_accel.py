@@ -231,7 +231,7 @@ def main():
     # Eval every N batches
     eval_interval = max(1, num_training_batches // 10)  # ~10 evals per epoch
     eval_results = []
-    best_acc = 0.0
+    best_acc = -1.0
     best_state_dict = None
     global_batch_idx = 0
 
@@ -272,6 +272,7 @@ def main():
             loss = -(l_old - c_coef * epsilon)
             optimizer.zero_grad()
             accelerator.backward(loss)
+            accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             with torch.no_grad():

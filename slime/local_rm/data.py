@@ -15,6 +15,21 @@ class TokenSample:
     response_length: int
 
 
+def parse_hh_rlhf_text(text: str) -> list[dict]:
+    """Parse hh-rlhf text field ('Human: ...\\n\\nAssistant: ...') into conversation turns."""
+    messages = []
+    parts = text.strip().split("\n\n")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith("Human: "):
+            messages.append({"role": "user", "content": part[len("Human: "):]})
+        elif part.startswith("Assistant: "):
+            messages.append({"role": "assistant", "content": part[len("Assistant: "):]})
+    return messages
+
+
 def load_demo_samples(
     path: str,
     tokenizer,

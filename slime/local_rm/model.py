@@ -202,7 +202,12 @@ def tokenize_prompt_answer(
 ) -> DemoSample:
     if apply_chat_template:
         if isinstance(prompt, str):
-            prompt = [{"role": "user", "content": prompt}]
+            if prompt.lstrip().startswith("Human: "):
+                from slime.local_rm.data import parse_hh_rlhf_text
+
+                prompt = parse_hh_rlhf_text(prompt)
+            else:
+                prompt = [{"role": "user", "content": prompt}]
         prompt_text = tokenizer.apply_chat_template(
             prompt,
             tokenize=False,

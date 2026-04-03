@@ -49,8 +49,8 @@ async def judge_pair(
     response_a: str,
     response_b: str,
     semaphore: asyncio.Semaphore,
-) -> tuple[str, str]:
-    """Returns (parsed_verdict, raw_verdict_text)."""
+) -> tuple[str, str, bool]:
+    """Returns (parsed_verdict, raw_verdict_text, is_parse_error)."""
     content = JUDGE_PROMPT.format(prompt=prompt, response_a=response_a, response_b=response_b)
     async with semaphore:
         for attempt in range(3):
@@ -68,20 +68,26 @@ async def judge_pair(
                 verdict_text = verdict.upper()
                 m = re.match(r'^\s*\**\s*([AB])\b', verdict_text)
                 if m:
-                    return m.group(1), verdict
+                    return m.group(1), verdict, False
                 if re.search(r'\bTIE\b|\bSAME\b|\bNEITHER\b', verdict_text):
-                    return "Tie", verdict
+                    return "Tie", verdict, False
                 m = re.search(r'\bRESPONSE\s+([AB])\b', verdict_text)
                 if m:
-                    return m.group(1), verdict
+                    return m.group(1), verdict, False
+                m = re.search(r'\b(?:MY\s+(?:ANSWER|CHOICE)|I\s+(?:WOULD\s+)?CHOOSE)[:\s]+([AB])\b', verdict_text)
+                if m:
+                    return m.group(1), verdict, False
+                m = re.search(r'\b([AB])\s+IS\s+(?:BETTER|BEST|MORE\s+HELPFUL|PREFERRED)\b', verdict_text)
+                if m:
+                    return m.group(1), verdict, False
                 logger.debug("unparseable verdict %r, treating as Tie", verdict)
-                return "Tie", verdict
+                return "Tie", verdict, True
             except Exception as e:
                 if attempt == 2:
                     logger.warning("judge failed after 3 attempts: %s", e)
-                    return "Tie", ""
+                    return "Tie", "", False
                 await asyncio.sleep(2 ** attempt)
-    return "Tie", ""
+    return "Tie", "", False
 
 
 def load_outputs(path: str) -> list[dict]:
@@ -130,7 +136,7 @@ async def run(args):
         else:
             judge_a, judge_b = resp_a, resp_b
 
-        verdict, raw_verdict = await judge_pair(client, args.model, prompt, judge_a, judge_b, semaphore)
+        verdict, raw_verdict, parse_error = await judge_pair(client, args.model, prompt, judge_a, judge_b, semaphore)
 
         if verdict == "Tie":
             winner = "tie"
@@ -147,6 +153,7 @@ async def run(args):
             "swapped": swap,
             "verdict": verdict,
             "raw_verdict": raw_verdict,
+            "parse_error": parse_error,
             "winner": winner,
         }
 
@@ -156,6 +163,7 @@ async def run(args):
     a_wins = sum(1 for r in results if r["winner"] == "a")
     b_wins = sum(1 for r in results if r["winner"] == "b")
     ties = sum(1 for r in results if r["winner"] == "tie")
+    parse_errors = sum(1 for r in results if r["parse_error"])
     total = len(results)
     winrate_a = (a_wins + 0.5 * ties) / total if total > 0 else 0.0
 
@@ -164,6 +172,7 @@ async def run(args):
         "a_wins": a_wins,
         "b_wins": b_wins,
         "ties": ties,
+        "parse_errors": parse_errors,
         "winrate_a": winrate_a,
         "model": args.model,
         "outputs_a": args.outputs_a,

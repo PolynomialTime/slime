@@ -119,6 +119,10 @@ def _build_messages(data: dict, prompt_key: str, as_conversation: bool, multimod
         # If prompt is a string and we don't apply chat template, return the prompt as is.
         if not as_conversation:
             return prompt
+        elif prompt.lstrip().startswith("Human: "):
+            from slime.local_rm.data import parse_hh_rlhf_text
+
+            prompt = parse_hh_rlhf_text(prompt)
         else:
             prompt = [{"role": "user", "content": prompt}]
 

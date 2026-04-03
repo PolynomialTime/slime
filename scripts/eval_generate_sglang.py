@@ -28,7 +28,12 @@ def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenize
         ct_kwargs = chat_template_kwargs or {}
         for p in raw:
             if isinstance(p, str):
-                msgs = [{"role": "user", "content": p}]
+                if p.lstrip().startswith("Human: "):
+                    from slime.local_rm.data import parse_hh_rlhf_text
+
+                    msgs = parse_hh_rlhf_text(p)
+                else:
+                    msgs = [{"role": "user", "content": p}]
             else:
                 msgs = p
             prompts.append(tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, **ct_kwargs))
