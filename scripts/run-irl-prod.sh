@@ -62,13 +62,15 @@ ROLLOUT_ARGS=(
    --input-key text
    --label-key label
    --apply-chat-template
+   --apply-chat-template-kwargs '{"enable_thinking":false}'
+   --rollout-stop-token-ids 151645
    --rollout-shuffle
 
    --num-rollout ${NUM_ROLLOUT}
    --rollout-batch-size 128
    --n-samples-per-prompt 1
-   --rollout-max-response-len 256
-   --rollout-temperature 0.8
+   --rollout-max-response-len 512
+   --rollout-temperature 1.0
 
    --global-batch-size 64
    --balance-data

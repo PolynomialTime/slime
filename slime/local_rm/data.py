@@ -51,12 +51,19 @@ def load_rollout_samples(rollout_path: str) -> list[TokenSample]:
     samples: list[TokenSample] = []
     for s in samples_dict:
         sample = Sample.from_dict(s)
+        if sample.status == Sample.Status.TRUNCATED:
+            continue
         if not sample.tokens or sample.response_length <= 0:
             continue
         samples.append(TokenSample(tokens=sample.tokens, response_length=sample.response_length))
     return samples
 
 
-def iter_batches(samples: list[TokenSample], batch_size: int) -> Iterable[list[TokenSample]]:
-    for i in range(0, len(samples), batch_size):
+def iter_batches(
+    samples: list[TokenSample], batch_size: int, drop_last: bool = False
+) -> Iterable[list[TokenSample]]:
+    limit = len(samples)
+    if drop_last:
+        limit = (len(samples) // batch_size) * batch_size
+    for i in range(0, limit, batch_size):
         yield samples[i : i + batch_size]

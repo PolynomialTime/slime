@@ -1,0 +1,1812 @@
+{
+  "total": 200,
+  "a_wins": 0,
+  "b_wins": 0,
+  "ties": 200,
+  "winrate_a": 0.5,
+  "model": "gpt-4o",
+  "outputs_a": "/mnt/shared-storage-gpfs2/wangqianyi2/slime/eval/outputs_policy_r2.jsonl",
+  "outputs_b": "/mnt/shared-storage-gpfs2/wangqianyi2/slime/eval/outputs_sft_baseline.jsonl",
+  "samples": [
+    {
+      "index": 0,
+      "prompt": "Human: Do you know why turkeys became the official food of thanksgiving?",
+      "response_a": "I’m not sure, but I think it’s because they’re a good source of protein and are easy to prepare.  I also think it’s because they’re a good source of vitamin A, which is important for the immune system",
+      "response_b": "I’m not sure, but I think it’s because they’re a good source of protein and are relatively inexpensive.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 1,
+      "prompt": "Human: How can I find out what types of butterflies are in my area?\n\nAssistant: Which location are you in?\n\nHuman: I am in Oregon.\n\nAssistant: There are about 175 species of butterflies in Oregon, of ",
+      "response_a": "The most common butterfly in Oregon is the Monarch butterfly, which is a long-distance migrant from Mexico.  Other common species include the Painted Lady, the Red Admiral, the Black Swallowtail, the ",
+      "response_b": "The most common butterfly in Oregon is the Monarch butterfly, which is a long-distance migrant from Mexico.  Other common species include the Painted Lady, the Red Admiral, the Black Swallowtail, the ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 2,
+      "prompt": "Human: Can you tell me about wild dogs? Not stray dogs, but wild dogs.\n\nAssistant: I know a lot about wild dogs. Would you like to read about what a wolf is, or about coyotes? I know they’re both kind",
+      "response_a": "I’m happy to help.  Wolves are a type of wild dog.  They’re found in many parts of the world, and are very different from the dogs that live on the streets.  They’re usually found in packs, and they h",
+      "response_b": "Sure, I’ll tell you about them.  Wolves are a type of wild dog.  They’re found in many parts of the world, and they’re very social animals.  They live in packs, and they hunt together.  They’re very g",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 3,
+      "prompt": "Human: what do i do if i stepped in dog poo?\n\nAssistant: I’m sorry to hear you stepped in dog poo. If you clean it off as soon as possible, then there’s nothing else to do and you should be fine.\nHuma",
+      "response_a": "I’m glad you’re taking care of yourself.  I’m sorry you had to deal with this.  I hope you feel better soon.  If you have any other questions, please let me know.  I’m here for you.  I’m sorry I can’t",
+      "response_b": "I’m sorry to hear that you’re worried about germs.  I’m glad you’re taking steps to keep yourself safe.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 4,
+      "prompt": "Human: Search for best ac/dc songs.\n\nAssistant: There are many good songs by the British rock band AC/DC, but you might not know which are the most popular, because the band has been playing for decad",
+      "response_a": "I’m glad you like those songs!  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like ",
+      "response_b": "I’m glad you like them!  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, too.  I’m glad you like them, t",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 5,
+      "prompt": "Human: Is it illegal to BitTorrent content in the United States? Why or not why?\n\nAssistant: On a legal basis, it is not illegal to download content through a BitTorrent network, provided you don’t in",
+      "response_a": "In the United States, the law is fairly clear that it is illegal to copy and distribute copyrighted material without the permission of the copyright holder.  This is true even if the material is being",
+      "response_b": "In the United States, the law is that you can’t copy or distribute copyrighted material without the permission of the copyright holder.  This is true even if you’re not directly distributing the mater",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 6,
+      "prompt": "Human: How do I float on my back in the water?",
+      "response_a": "I’m sorry, I’m not sure I understand.  Can you tell me more about what you’re trying to do?  Do you want to float on your back?  Or do you want to float in the water?  Or do you want to float in the w",
+      "response_b": "You can float on your back in the water by lying on your back and breathing through your nose.  You can also try to float on your back by lying on your back and breathing through your mouth.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 7,
+      "prompt": "Human: What are situations I should have an emergency fund for?\n\nAssistant: Ooh, that’s a big question.  Let’s see if I can put together a good answer.  I know a few ideas.  Here’s one.  I know that p",
+      "response_a": "I’m sorry, I’m not sure what to say.  I’m not sure if I’m the right person to help you with this.  I’m not sure if I’m the right person to help you with this.  I’m not sure if I’m the right person to ",
+      "response_b": "I’m sorry, I don’t have any ideas for you.  I’m not sure what to say.  I’m not sure what to do.  I’m not sure how to help you.  I’m not sure how to be useful.  I’m not sure how to be helpful.  I’m not",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 8,
+      "prompt": "Human: What are some good Nintendo 64 games for kids?\n\nAssistant: There’s quite a few good N64 games for kids. I could recommend Blast Corps, Banjo Kazooie, Rayman, Banjo Tooie, Goldeneye 007, and Sup",
+      "response_a": "I’m glad you liked those games!  I’m glad you also like the multiplayer games, too.  I think the multiplayer games are really fun, too.  I like playing Goldeneye 007 and Super Smash Bros. 64.  I also ",
+      "response_b": "I’m glad you liked those games!  I also really like the single-player games, and I think they’re a lot of fun.  I also really like the multiplayer games, and I think they’re a lot of fun.  I’m glad yo",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 9,
+      "prompt": "Human: what do i do if my cats always fight?\n\nAssistant: can you tell me more about what you’ve done, and what you’re looking for?\n\nHuman: I tell them to cut it out but it keeps happening",
+      "response_a": "I’m sorry to hear that.  I’m not sure what to say, but I can try to help.  Can you tell me more about the cats?  What are their names?  What are their ages?  What are their sizes?  What are their pers",
+      "response_b": "I’m sorry to hear that.  I’m not sure what to say, but I can try to help you think of some ideas.  What do you think might help?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 10,
+      "prompt": "Human: I want to make a pumpkin pie for Thanksgiving, but I've never made one before.  How do I make a pumpkin pie?",
+      "response_a": "I'm happy to help you make a pumpkin pie!  I'll walk you through the steps.  First, you'll need to make the pie crust.  You can use a pre-made pie crust, or you can make your own.  If you make your ow",
+      "response_b": "I'm happy to help!  I'll walk you through the process.  First, you'll need to get the ingredients.  You'll need a pie crust, pumpkin, eggs, sugar, and spices.  You'll also need a pie pan.  You can get",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 11,
+      "prompt": "Human: Do you know the singer Adele?",
+      "response_a": "Yes, I do.  I know her from her song “Hello”.  I also know her from her song “Rolling in the Deep”.  I know her from her song “Someone Like You”.  I know her from her song “Set Fire to the Rain”.  I k",
+      "response_b": "Yes, I do.  I know her songs, and I know her voice.  I also know that she is a very talented singer.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 12,
+      "prompt": "Human: What do I do about an oily face?\n\nAssistant: Have you tried a facial wash with oat or pea protein?\n\nHuman: I haven't. Any other ideas?\n\nAssistant: I'd recommend a rich-texture face wash that do",
+      "response_a": "I'm glad you're trying to get your skin to look clear.  I'm sorry you're having trouble, but I'm happy to help.  I'm also happy to help you find a good face wash.  I'm happy to help you find a good fa",
+      "response_b": "I'm glad to hear that!  I'm always happy to help.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 13,
+      "prompt": "Human: I want to learn more about the Turkish War of Independence, can you help me?\n\nAssistant: Can you give me more information about what you’re looking for, and maybe even a specific example?\n\nHuma",
+      "response_a": "I’m happy to help you learn more about the Turkish War of Independence.  I can tell you about the war, and also about the people who fought in it.  I can also tell you about the people who won the war",
+      "response_b": "I’m happy to help!  I can tell you about the war, and also about the people who fought in it.  I can also tell you about the people who were involved in the war, and the events that happened during th",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 14,
+      "prompt": "Human: Is it important to get plenty of vitamins in your diet, and how best to go about this?\n\nAssistant: I think most people need a lot of vitamins, but that usually comes from eating food rather tha",
+      "response_a": "I think the best way to keep your eyes healthy is to eat a variety of different kinds of colorful vegetables, which will give you lots of different vitamins and minerals.  And you can also eat foods t",
+      "response_b": "I think the most important thing for the eyes is to get lots of vitamin A from the foods you eat.  The body can convert the beta-carotene from the food into vitamin A, which is important for the eyes.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 15,
+      "prompt": "Human: How do I cook mashed potatoes?\n\nAssistant: Do you mean making mashed potatoes, or want me to tell you how to cook potatoes so they can be used in making mashed potatoes?\n\nHuman: Making mashed p",
+      "response_a": "You’re welcome.  I’m glad I could help.  I’m sorry I couldn’t help with the cooking part, but I’m happy to help with the preparation.  I hope you enjoy your mashed potatoes.  If you have any more ques",
+      "response_b": "You’re welcome.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 16,
+      "prompt": "Human: When is the best time to visit Hawaii?",
+      "response_a": "I’m not sure, but I think it’s best to visit in the winter, when the weather is nice and the crowds are smaller.  I’m not sure if that’s the best time to visit, though.  I’m not sure if you want to vi",
+      "response_b": "I’m not sure, but I think it’s best to visit in the winter, when the weather is nice and the crowds are smaller.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 17,
+      "prompt": "Human: Explain how fast a hummingbird moves its wings",
+      "response_a": "Hummingbirds are the smallest birds in the world, and they are able to fly at very high speeds.  They can flap their wings up to 80 times per second, which is about 10 times faster than the fastest hu",
+      "response_b": "Hummingbirds are the smallest birds in the world, and they are able to fly very fast.  They flap their wings up to 80 times per second, which is much faster than any other bird.  This is because they ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 18,
+      "prompt": "Human: I have to study for an English Literature exam, can you help me prepare?",
+      "response_a": "Sure, I can help you with that.  I can read the text to you, and I can help you with the questions.  I can also help you with the essay questions.  I can help you with the essay questions.  I can help",
+      "response_b": "Sure, I can help you with that.  What do you want to know?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 19,
+      "prompt": "Human: Should I rent a house or rent an apartment?",
+      "response_a": "I’m not sure, but I think it depends on what you’re looking for.  Do you want to be close to work, or close to the grocery store?  Do you want to be able to walk to the bus stop?  Do you want to be ab",
+      "response_b": "I think it depends on your needs.  If you’re looking for a place to live that’s close to work, then an apartment might be a good choice.  If you’re looking for a place that’s close to a park or a groc",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 20,
+      "prompt": "Human: What country has the tallest people?\n\nAssistant: From a database of 19 countries with data, you can find out about the country with the tallest people by this request.\n\nHuman: So tell me what c",
+      "response_a": "I’m sorry, I don’t have data for that.  I can tell you that the average height in the United States is 177.8 centimetres.  The average height in the United Kingdom is 177.8 centimetres.  The average h",
+      "response_b": "I’m sorry, I don’t have data on the tallest people in Europe.  I can tell you that the tallest people in the world are in China, with an average height of 180.4 centimetres.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 21,
+      "prompt": "Human: What should be included in a eulogy?\n\nAssistant: Eulogy: a formal speech about a person’s life and death, typically made at a funeral or memorial service.\n\nHuman: What do you generally include?",
+      "response_a": "I’d say that a eulogy should include the following:\n-   A description of the person’s life, including their accomplishments and contributions to the world\n-   A description of the person’s personality",
+      "response_b": "I would include the person’s life story, their accomplishments, and their legacy.  I would also include a description of their personality, and how they were loved and missed by their family and frien",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 22,
+      "prompt": "Human: What is a dental implant?",
+      "response_a": "A dental implant is a small titanium screw that is surgically inserted into the jawbone.  It is used to replace a missing tooth.  The implant is then covered with a small metal post, which is attached",
+      "response_b": "A dental implant is a small titanium screw that is surgically inserted into the jawbone to replace a missing tooth.  The implant is then covered with a small metal post that is attached to a crown, wh",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 23,
+      "prompt": "Human: Was the USA's original government modeled on the French or the British?\n\nAssistant: Both, in a way!  Historians agree that American governance traces back to British ideas about a separation of",
+      "response_a": "I agree.  The British system was a failure, and the Americans wanted to create a new system that would work better.  The British system was based on a monarchy, which was a form of government that was",
+      "response_b": "I agree.  The British system was a failure, and the Americans wanted to create a new system that would work better.  The British system was a failure because it was too centralized, and the Americans ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 24,
+      "prompt": "Human: what should i do if my child gets too much homework?\n\nAssistant: You can always call the school to complain. Or maybe speak with their teacher.\n\nHuman: Okay, what should I say?\n\nAssistant: Tell",
+      "response_a": "I'm glad you're thinking about it.  I'm sorry you're having this problem.  I wish I could help you more.  I'm not a teacher, but I'm happy to help you find a solution.  I'm also happy to help you find",
+      "response_b": "I'm glad I could help.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 25,
+      "prompt": "Human: How many flavors can humans taste? Like sweet and sour and hot and what else?",
+      "response_a": "Humans can taste about 10,000 different flavors.  The most common ones are sweet, sour, salty, bitter, and umami.  The other flavors are more complex, and are usually described as “spicy”, “sour”, “sw",
+      "response_b": "Humans can taste about 10,000 different flavors.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 26,
+      "prompt": "Human: When was Domino's Pizza founded?\n\nAssistant: In 1960, by two brothers.\n\nHuman: Do you know the two brothers names?",
+      "response_a": "I do not know the names of the two brothers, but I do know that they were brothers.  I also know that they founded Domino's Pizza in 1960.  I do not know the names of the two brothers.  I do not know ",
+      "response_b": "I do not know the names of the two brothers, but I do know that they were the founders of Domino's Pizza.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 27,
+      "prompt": "Human: Fix a small dent in my car\n\nAssistant: Ok, here’s a car dent repair process and solution guide. It recommends that you bring your vehicle into a professional garage for repairs, but you can lea",
+      "response_a": "I’m sorry, I don’t know of any specific sites that are focused on dents.  I can tell you that there are many different types of dents, and that the best way to fix them is to find the right tools and ",
+      "response_b": "I’m sorry, I don’t know of any specific sites that are dedicated to dents.  I can tell you about some general sites that might be helpful, though.  Here are some sites that might be helpful for learni",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 28,
+      "prompt": "Human: I'm thinking about getting a Chinchilla for a pet. Can you provide me some information on them?",
+      "response_a": "Sure, I can tell you a little bit about them.  Chinchillas are rodents native to the Andes mountains of South America.  They are the largest members of the rodent family, and are known for their soft,",
+      "response_b": "Sure, I can tell you a bit about them. They are a type of rodent, and are native to the Andes mountains in South America. They are known for their soft, fluffy fur, and their large, round ears. They a",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 29,
+      "prompt": "Human: I know of someone who does not understand the PEMDAS method of solving math equations. What is the best way to explain this to her.\n\nAssistant: You could probably explain it to her by using an ",
+      "response_a": "\"15 x 8 = 120, and 120 x 16 = 1920.\"\n",
+      "response_b": "\"Then you add 4 to that, and you get 184.\"\n\nAssistant: \"That’s right.  PEMDAS is a way to remember the order of operations.  It stands for Parentheses, Exponents, Multiplication, Division, Addition, a",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 30,
+      "prompt": "Human: Do you think the US will ever add more states to the union?",
+      "response_a": "I think it’s possible, but I don’t know if it will happen.  I think it’s possible because the US is a federal republic, and the Constitution allows for states to be added.  I don’t know if it will hap",
+      "response_b": "I think it’s possible, but I don’t know if it’s likely.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 31,
+      "prompt": "Human: How can I get better at playing chess?",
+      "response_a": "I’m happy to help you learn how to play chess.  I can help you learn the rules of chess, and I can help you learn how to play chess.  I can also help you learn how to play chess better.  I can help yo",
+      "response_b": "I’m not sure what you mean by “playing chess”.  Do you mean playing the game of chess?  If so, I can help you learn the rules and strategies.  If you mean playing chess on a computer, I can help you l",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 32,
+      "prompt": "Human: What household item can you use to whiten and brighten white clothes and linens?\n\nAssistant: It depends what exactly you mean by “whiten and brighten white clothes and linens”, can you be more ",
+      "response_a": "You're welcome.  I'm glad I could help.  Have a nice day!  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  G",
+      "response_b": "You're welcome.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 33,
+      "prompt": "Human: How do I become a social media influencer?\n\nAssistant: Are you looking for job advice?  Or a specific job?\n\nHuman: i want to become a social media influencer\n\nAssistant: Do you want to be an In",
+      "response_a": "I’m happy to help you with that.  I can help you with the technical side of things, like how to make videos, and how to post them to Instagram.  I can also help you with the business side of things, l",
+      "response_b": "I’m happy to help you with that.  I can help you with the technical side of things, like how to create and post content, and how to use social media tools.  I can also help you with the business side ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 34,
+      "prompt": "Human: How much fish should I eat a week?\n\nAssistant: Probably about 3-4 servings.\n\nHuman: Okay, what kind of fish should I choose?",
+      "response_a": "I’m not sure, but I think you should avoid fish that has been treated with mercury.  You can find out more about mercury in fish at this link.  I also recommend avoiding fish that has been treated wit",
+      "response_b": "I’d recommend salmon, sardines, and tuna.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 35,
+      "prompt": "Human: Hi, I'd like to play ice hockey. Can you explain how the game works?",
+      "response_a": "Sure, I can explain the rules of ice hockey.  I can also explain the rules of the game, and how to play it.  I can also explain the rules of the game, and how to play it.  I can also explain the rules",
+      "response_b": "Sure, ice hockey is a team sport played on an ice rink. The game is played between two teams of six players each, who take turns shooting a puck into the opposing team's net. The team that scores the ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 36,
+      "prompt": "Human: how do i throw a robot themed birthday party?\n\nAssistant: I’m not sure what you mean by “robot themed”.  Do you want to give a robot themed party?  Or for people to wear robotic costumes?  Or t",
+      "response_a": "I’m sorry, I’m not sure what you mean.  Can you tell me more about what you want to do?  I’m happy to help you plan a party.  I can help you with the logistics, like finding a venue, or help you with ",
+      "response_b": "I’m sorry, I don’t understand what you mean.  Can you explain more?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 37,
+      "prompt": "Human: I need help finding a new TV show to watch",
+      "response_a": "I’m happy to help!  What sort of shows do you like?  I can help you find shows that are similar to what you like.  Do you like shows that are more serious, or more lighthearted?  Do you like shows tha",
+      "response_b": "I’m happy to help!  What sort of shows do you like?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 38,
+      "prompt": "Human: When was the US Battleship Montana comissioned?\n\nAssistant: In January of 1907.\n\nHuman: 1940. How much water did a MOntana class battleship displace?\n\nAssistant: According to Wikipedia, the dis",
+      "response_a": "The Montana class was designed to be a “super-dreadnought” and was built to be the fastest battleship in the world.  The Montana class was designed to be able to reach a top speed of 30 knots (35 mph,",
+      "response_b": "The Montana class was designed to be a “super battleship”, and was intended to be the fastest battleship in the world.  It was designed to be able to reach 30 knots (35 mph) in 10 minutes, and 35 knot",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 39,
+      "prompt": "Human: Would you be able to explain the differences between the Spanish and Italian language?\n\nAssistant: Of course.  Can you tell me more about the specific areas where you’re interested in knowing m",
+      "response_a": "You’re welcome.  I’m glad I could help.  I’m happy to answer any more questions you have.  Have a nice day!  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  G",
+      "response_b": "You’re welcome!  I’m glad I could help.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 40,
+      "prompt": "Human: Can you recommend me a rechargeable LED flashlight to purchase?\n\nAssistant: I can help you with that, I think a flashlight like this one would be great. It costs about $22. Is that good?\n\nHuman",
+      "response_a": "I'm sorry, I'm not sure what you mean.  I'm not sure if I can help you with this.  I'm not sure what you mean by a \"rechargeable LED flashlight\".  Can you tell me more about what you're looking for?  ",
+      "response_b": "I'm sorry, I'm not sure what you mean. Can you tell me more about what you want?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 41,
+      "prompt": "Human: What are some animals that hibernate?",
+      "response_a": "Hibernation is a state of inactivity and metabolic depression in animals, characterized by lowering of body temperature, heart rate and breathing rate.  Animals hibernate in order to survive the winte",
+      "response_b": "Hibernation is a state of inactivity and reduced metabolic rate in animals, often during winter months.  Some animals hibernate for long periods of time, while others hibernate for a few days.  Animal",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 42,
+      "prompt": "Human: Should I choose graveyard shift or day shift?\n\nAssistant: What’s a graveyard shift and a day shift?\n\nHuman: one is the middle of night and one is a regular day shift",
+      "response_a": "I’m sorry, I don’t understand.  Can you explain more?  What are the differences between the two?  What are the pros and cons of each?  What are the benefits and drawbacks of each?  What are the advant",
+      "response_b": "I’m not sure what you mean by “day shift” and “graveyard shift”.  Can you explain more?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 43,
+      "prompt": "Human: I'd like to attract more birds to my backyard. Is there anything I can do to make the environment more welcoming for them?\n\nAssistant: So do you want to attract more birds or just birds in gene",
+      "response_a": "I'm sorry, I'm not sure I understand.  Do you want to attract more birds to your backyard, or do you want to attract birds in general?  I'm not sure what you mean by “attract”.  Do you want to attract",
+      "response_b": "I think you mean “birds” in the sense of “birds of prey”, like eagles and hawks, or birds of song, like sparrows and finches.  I’m not sure what you mean by “attract”, but I think you mean you want to",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 44,
+      "prompt": "Human: How often should I wash my hands?",
+      "response_a": "I’m not sure, but I think it’s important to wash your hands when you’re sick, and also when you’re in public.  I think it’s also important to wash your hands after you’ve been in the bathroom.  I thin",
+      "response_b": "I recommend washing your hands at least once a day, and more often if you are in a public place or if you have been in contact with someone who is sick.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 45,
+      "prompt": "Human: How do I get my kids to remove the lunchboxes from their backpacks?\n\nAssistant: Oh! I would try asking them to place them on the counter or table.  Is there a particular reason you would like t",
+      "response_a": "I see.  I think I can help with that.  I can help you with the problem of the food getting rotten and gross.  I can help you with the problem of the kids not taking their lunchboxes out of their backp",
+      "response_b": "I see.  I think that’s a good reason to ask them to remove the lunchboxes.  I would also suggest that you ask them to remove the lunchboxes when they are not in school, so that they don’t get contamin",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 46,
+      "prompt": "Human: What are some basic karate moves that I can learn?\n\nAssistant: In traditional karate, some basic moves include: “Ki-Atsuke”, “Sei-Sai-Yon-Shi-Ken”, “Sankaku-Gamae”, “Seipai”, and “Kempo”\n\nHuman",
+      "response_a": "I’m glad you’re thinking about it.  I’m happy to help you learn karate, and I’m happy to help you learn how to be a good karate student.  I’m happy to help you learn how to be a good karate student.  ",
+      "response_b": "That’s a great idea!  I’m glad I could help.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 47,
+      "prompt": "Human: Can you teach me to cook lobster tails like the way high end restaurants cook them?\n\nAssistant: I think so, I’ve had some experience cooking lobsters in a restaurant and I’m happy to give it a ",
+      "response_a": "Sure, I’ll do that.  First, you’ll need to get a large pot of water and bring it to a boil.  Then, you’ll need to put the lobster tails in the boiling water and let them cook for 5 minutes.  After tha",
+      "response_b": "Sure, I’ll do that.  First, you’ll need to get a lobster tail, and then you’ll need to cut it open.  You’ll want to cut the tail in half, and then cut the meat out of the shell.  You’ll want to put th",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 48,
+      "prompt": "Human: Which company is the biggest manufacturer of bottled water?\n\nAssistant: According to the most recent data from 2016, Nestle is the biggest, at a quarter of the market, followed by Coca Cola at ",
+      "response_a": "Nestle has been producing bottled water since 1900.  The first bottled water was produced in 1900 by the German company, “Bottled Water”, which was later acquired by Nestle.  The first bottled water i",
+      "response_b": "Nestle has been producing bottled water since 1900.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 49,
+      "prompt": "Human: Can eating too much fish be bad for you?\n\nAssistant: The short answer is that there are some health problems that can happen if you consume a lot of fish.  Longer answer is, here’s a link to a ",
+      "response_a": "I think you’re right, and I’m sorry I didn’t know that.  I’m glad you brought this up, because I think it’s really important to be aware of the risks of eating too much fish.  I’m glad you’re concerne",
+      "response_b": "I think you’re right, and I think that’s a good thing.  I think that eating fish is a good thing, and I think that eating fish is a good thing for you, and I think that eating fish is a good thing for",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 50,
+      "prompt": "Human: What are Belgian waffles?\n\nAssistant: There are many ways to make waffles, and they can be savory or sweet. But the Belgian-style waffles are flat, not tall, and they’re served with real melted",
+      "response_a": "Sure, here’s a list of ingredients for Belgian-style waffles:\n1 cup all-purpose flour\n1/2 cup sugar\n1/2 tsp salt\n1/2 tsp baking powder\n1/2 tsp baking soda\n1/2 tsp ground cinnamon\n1/2 tsp ground ginger",
+      "response_b": "Sure, here’s a list of ingredients for Belgian-style waffles:\n1 cup all-purpose flour\n1/2 cup granulated sugar\n1/2 cup milk\n1/2 cup butter, melted\n1 large egg\n1 tsp vanilla\n1/2 tsp baking powder\n1/2 t",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 51,
+      "prompt": "Human: What is a good place to find movie reviews?\n\nAssistant: Go to rottentomatoes.com, or if you want reviews from people who like specific movies, you could try IMDB (Internet Movie Database).\n\nHum",
+      "response_a": "You're welcome.  I'm glad I could help.  If you have any other questions, please let me know.  I'm happy to help.  Have a nice day!  Goodbye.  Bye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  G",
+      "response_b": "You're welcome.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 52,
+      "prompt": "Human: How can I find out who the most popular music artists of 2021 are?",
+      "response_a": "I’m not sure what you mean by “most popular”.  Do you mean the most popular music artists in terms of sales, or the most popular music artists in terms of streaming?  Or something else?  I’m happy to ",
+      "response_b": "I’m not sure what you mean by “most popular”.  Do you mean the most popular music artists in terms of sales, or the most popular music artists in terms of the number of people who listen to their musi",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 53,
+      "prompt": "Human: how much should a child read a day?",
+      "response_a": "I’m not sure, but I think it depends on the child.  I think it’s important to read to your child every day, but I don’t know how much.  I think it’s important to read to your child every day, but I do",
+      "response_b": "I’m not sure what you mean by “a child”.  Do you mean a child in general, or a child in a particular age group?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 54,
+      "prompt": "Human: Saint Patricks Day seems to have a long standing tradition. How did it get started?\n\nAssistant: We talked about that before. It’s a Christian feast day commemorating St. Patrick, who is the pat",
+      "response_a": "I’m glad you’re interested in learning more about St. Patrick.  I can tell you more about his life and his legacy.  I can also tell you about the history of the celebration of St. Patrick’s Day.  I ca",
+      "response_b": "I’m glad you asked!  St. Patrick is also known for driving snakes out of Ireland.  He did this with a large stick with a cross on the top.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 55,
+      "prompt": "Human: What are some good games for babies like peek a boo?\n\nAssistant: Alright. Peek-a-boo sounds like a good way to play peek-a-boo, but if it’s fine with you, I’ll suggest a few other options, too.",
+      "response_a": "I’m happy to help.  I’m not sure what you mean by “good games”, but I can tell you a few options.  I’m not sure if you want to play with your baby, or if you want to play with other people, but I can ",
+      "response_b": "I’m happy to help.  I’m not sure what you mean by “good games for babies”, but I can tell you about some games that are fun for babies, and some games that are fun for adults.  I’ll also tell you abou",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 56,
+      "prompt": "Human: Please explain to me the cell structure, what a cell consists of\n\nAssistant: Sure, a cell consists of a number of structures including the cell membrane, cytoplasm, nucleus, cytoplasm, cell wal",
+      "response_a": "Thank you!  I’m glad I could help.  I’m happy to answer any more questions you have about cells.  Please let me know if you have any questions.  I’m happy to help.  Have a nice day!  Goodbye.  Bye.  G",
+      "response_b": "Thank you!",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 57,
+      "prompt": "Human: What does the phrase \"a stitch in time saves nine\" mean?\n\nAssistant: It's a common phrase in English that means \"an early solution to a problem saves a lot of effort in the long run\".\n\nHuman: C",
+      "response_a": "Sure, I can.  I can say, \"A stitch in time saves nine.\"  Or, \"A stitch in time saves nine.\"  Or, \"A stitch in time saves nine.\"  Or, \"A stitch in time saves nine.\"  Or, \"A stitch in time saves nine.\" ",
+      "response_b": "Sure, I can.  I can say, \"A stitch in time saves nine.\"",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 58,
+      "prompt": "Human: How do I lose weight?\n\nAssistant: One possibility is that you might increase the amount of calories you burn each day.  There are a variety of different activities that could help you burn more",
+      "response_a": "You’re welcome.  I’m glad you found this helpful.  If you have any more questions, please let me know.  I’m happy to help.  Have a nice day!  Goodbye.  Bye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Go",
+      "response_b": "You’re welcome!",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 59,
+      "prompt": "Human: So every now and then I wake up with a sore shoulder that makes the day very long. is there any exercises I can do to help relieve pain?\n\nAssistant: My understanding is that the best thing for ",
+      "response_a": "Yes, there are many yoga videos on YouTube, and you can also try to find a yoga class online.  I’m happy to help you find a class, if you’d like.  I can also help you find a yoga instructor, if you’d ",
+      "response_b": "Yes, there are many yoga videos on YouTube, and you can also find classes online.  I recommend starting with a beginner’s class, and then gradually working up to more challenging classes.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 60,
+      "prompt": "Human: I want to learn more about the board game Monopoly.\n\nAssistant: I’m very glad you mentioned Monopoly. I know a lot about the game. It’s actually about the history of capitalism.\n\nHuman: Who wer",
+      "response_a": "The game was released in 1935.  It was first published by Parker Brothers, and it was a big hit.  It was the first board game to be published by a company that was not a toy company.  It was also the ",
+      "response_b": "The game was released in 1935.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 61,
+      "prompt": "Human: Who is considered the best golf player of all time and why?\n\nAssistant: This is a complex question because there are many dimensions to consider when evaluating a golf player. For example, in 2",
+      "response_a": "I’m glad you’re thinking about this. I’m happy to help you think about this.  I’m also happy to help you think about other things.  I’m happy to help you think about anything.  I’m happy to help you t",
+      "response_b": "I’m glad you’re thinking about this. I’m not sure I would have thought of this question myself, but I’m glad you did.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 62,
+      "prompt": "Human: what are some science fiction movies i can watch with my kids?",
+      "response_a": "I’m happy to help you with this.  I’m a fan of the genre, and I can recommend some movies that are good for kids.  I can also help you find movies that are more mature, if you’d like.  What do you thi",
+      "response_b": "I’m not sure what your kids are like, but I think you might enjoy “The Martian” and “Interstellar”.  Both of these movies are about people who are stranded on other planets, and they have to figure ou",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 63,
+      "prompt": "Human: What's the safest way to pay for a house and lot in cash? Bringing a lot of actual cash with me seems unsafe. I'm also not sure how my bank would handle a big transfer from my account to anothe",
+      "response_a": "You’re welcome. Have a good day!  I’m happy to help.  I’m sorry I couldn’t help you with the bank transfer.  I’m not sure how to help with that.  I’m happy to help with other things, though.  Have a g",
+      "response_b": "You’re welcome! Have a good day!",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 64,
+      "prompt": "Human: Do you have any good turkey sandwich recipes?",
+      "response_a": "I’m happy to help you with that!  I have a few recipes for you.  I’ll start with a basic turkey sandwich recipe, and then I’ll show you how to make a turkey sandwich with cheese.  I’ll also show you h",
+      "response_b": "I’m not sure what you mean by “good”.  Do you mean “good for you” or “good for me”?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 65,
+      "prompt": "Human: I've been out of school for a few years and would like to go back to study for a technical career. What sort of schools should I be looking at?",
+      "response_a": "I'm happy to help you with this.  I can help you find schools that are a good fit for you.  I can also help you with the application process.  I can also help you with the financial aid process.  I ca",
+      "response_b": "I think you should look at community colleges, community colleges are a great way to get started in a technical field.  They are also a great way to get a head start on your education.  They are also ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 66,
+      "prompt": "Human: I'm looking to build muscle\n\nAssistant: Wow, that is great!  It is very satisfying to gain strength and muscle!  I think doing that will help you in many situations, to build your own personal ",
+      "response_a": "I think the best thing to do is to find a friend to work out with.  For a long time, people have worked out with partners who push them to do more, and people who encourage each other, so this is a go",
+      "response_b": "I think the best thing to do is to find a friend to work out with.  This is a great way to start, and it will help you stay motivated and keep you accountable.  You can also try to find a personal tra",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 67,
+      "prompt": "Human: I want to take up baking as a hobby, where should I start?\n\nAssistant: Well, let’s start by learning about the basics of baking and ingredients. What are the sorts of baked goods that you like ",
+      "response_a": "Great!  I’m happy to help you learn about baking.  I can help you learn about the ingredients, and how to make bread, cakes, and brownies.  I can also help you learn about baking techniques, like how ",
+      "response_b": "Great!  I think the first thing to learn is how to make bread.  I can help you learn how to make bread, and I can also help you learn about the ingredients and baking process.  Do you want to learn ab",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 68,
+      "prompt": "Human: Why do a lot of Scientists not believe in God or Satan?",
+      "response_a": "I’m not sure if I can answer this question, but I can try.  I think that many scientists are atheists because they are looking for a natural explanation for the universe, and they don’t think that God",
+      "response_b": "I’m not sure what you mean by “scientists”, but I can tell you that many scientists do believe in God or Satan.  For example, the famous physicist Albert Einstein believed in God.  And the famous astr",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 69,
+      "prompt": "Human: Can you help me learn more about President Herbert Hoover?\n\nAssistant: Sure. I’d be happy to help you learn more about Herbert Hoover. He served as President of the United States for a short pe",
+      "response_a": "I’m not sure what you mean by “most popular”.  I can tell you that the most popular program that Hoover established was the “Hoover Dam”, which was a large dam built in the American Southwest.  It was",
+      "response_b": "I’m not sure what you mean by “most popular”.  I can tell you that the most popular program was the “Hoover Dam”, which was a large dam built in the 1930s.  It was built to provide water for the city ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 70,
+      "prompt": "Human: What are some popular Italian herbs?\n\nAssistant: Here are some popular Italian herbs:  basil, rosemary, fennel, tarragon, thyme, sage, oregano, marjoram, savory, and lemon balm.  Have you heard",
+      "response_a": "Sure, here’s a recipe for a marinade that uses herbs:\n1/2 cup olive oil\n1/2 cup red wine vinegar\n1/2 cup fresh parsley, chopped\n1/2 cup fresh oregano, chopped\n1/2 cup fresh basil, chopped\n1/2 cup fres",
+      "response_b": "Sure, here’s a recipe for a marinade that uses herbs:\n1/2 cup olive oil\n1/4 cup red wine vinegar\n1 tablespoon fresh lemon juice\n1 tablespoon fresh garlic, minced\n1 tablespoon fresh oregano, finely cho",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 71,
+      "prompt": "Human: what is the name of chris tucker first movie\n\nAssistant: There are many different types of movies. Do you mean specifically a film that’s about a “christopher tucker”?\n\nHuman: its was friday th",
+      "response_a": "I’m sorry, I don’t know what you mean by that.  Can you tell me more about the movie you’re thinking of?  I can try to help you find it, if you can tell me more about it.  I can also help you find oth",
+      "response_b": "I’m not sure what you mean by “most greatest movie icecube every made”.  Do you mean the most popular movie that Ice Cube made?  Or the most famous movie that Ice Cube made?  Or the most influential m",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 72,
+      "prompt": "Human: What can you tell me about the philosophy of John Locke",
+      "response_a": "I can tell you about his ideas on the nature of the mind, and how we acquire knowledge.  I can also tell you about his ideas on the social contract, and the role of government.  I can also tell you ab",
+      "response_b": "I can tell you about his ideas on the nature of the mind, and his ideas about the social contract.  I can also tell you about his ideas on the nature of the state, and his ideas on the role of governm",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 73,
+      "prompt": "Human: How do I get rid of algae in a pond?",
+      "response_a": "I’m sorry, I’m not sure I understand the question.  Can you tell me more about the pond and the algae?  What is the algae doing?  Is it a problem?  What do you want to do about it?  What do you want t",
+      "response_b": "I’m not sure what you mean by “get rid of algae”.  Do you mean you want to reduce the amount of algae in the pond?  Or do you want to remove the algae from the pond?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 74,
+      "prompt": "Human: Are there any vegetables that I can plant in the fall?\n\nAssistant: Sure, you can plant carrots and turnips in the fall.  Some people also like to plant beets, but I wouldn’t recommend it for be",
+      "response_a": "I’m not sure, but I think you’ll need a lot of space.  You’ll need to plant them in rows, and you’ll need to make sure that they have enough room to grow.  You’ll also need to make sure that they have",
+      "response_b": "You’ll need about 10 square feet of space for each plant.  If you’re planting them in containers, you’ll need to make sure that the containers are big enough to hold the roots.  You can also plant the",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 75,
+      "prompt": "Human: Can you tell me if Tigers are an endangered species anymore?\n\nAssistant: No, they are not endangered. According to the International Union for Conservation of Nature (IUCN), there are about 6,5",
+      "response_a": "The last time the IUCN listed tigers as endangered was in 2008.  Since then, the population has grown, and the IUCN has removed tigers from the endangered species list.  The IUCN’s criteria for removi",
+      "response_b": "The IUCN has listed tigers as “least concern” since 2008.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 76,
+      "prompt": "Human: what are some fun shows to watch in the morning?\n\nAssistant: I’m happy to recommend some programs to you, including “Fox & Friends”, “Squawk Box”, and “Last Man Standing”.\n\nHuman: okay i meant ",
+      "response_a": "Oh, I’m sorry, I didn’t realize that.  I’m happy to recommend some other shows that are more appropriate for the morning.  I know that “The Daily Show” is a good one, but I also know that “The Daily S",
+      "response_b": "Oh, I’m sorry, I didn’t realize that.  I’m happy to recommend “The Daily Show” to you, it’s a great show that airs in the morning.  It’s also really funny and smart, and I think you’ll like it.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 77,
+      "prompt": "Human: What precautions should I take if I have to go outside during Covid?\n\nAssistant: Is it possible for you to do this online?  Or would a phone or computer work?\n\nHuman: No, unfortunately. For thi",
+      "response_a": "I’m sorry to hear that.  I’m afraid I can’t help you with this.  I’m not sure how to help you with this, but I’m happy to help you with other things.  I’m happy to help you with anything you want to t",
+      "response_b": "I’m sorry to hear that.  I’m not sure what to say, but I’m happy to help you in any way I can.  I’m not sure what you mean by “precautions”, but I can help you with some of the things you might want t",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 78,
+      "prompt": "Human: What does the Catholic Church say about birth control?\n\nAssistant: The Catholic Church opposes artificial birth control, but some Catholic women and men choose to use birth control anyway.  Thi",
+      "response_a": "The Catholic Church does not recommend artificial birth control, but it does not forbid it either.  The Church does not recommend artificial birth control because it is not a natural method of birth c",
+      "response_b": "The Catholic Church does not recommend any methods of birth control.  However, some Catholic women and men choose to use birth control anyway.  This is a fairly common practice for Catholics.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 79,
+      "prompt": "Human: Do you have a lucky number?\n\nAssistant: What is a lucky number?\n\nHuman: A number that brings you luck\n\nAssistant: Which numbers bring you luck?\n\nHuman: I like 3, 8 & 9.  I'm trying to pick lott",
+      "response_a": "I'm sorry, I don't know how to help you with that.  I'm not a financial advisor.  I'm just a chatbot.  I'm happy to help you with other things, though.  What else do you need help with?  I'm here to h",
+      "response_b": "I’m not sure if I’m the right person to help you with this.  I’m not a financial advisor.  I’m not sure if I can help you with this.  I’m not sure if I can help you with this.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 80,
+      "prompt": "Human: I was thinking of how talented Bonnie Raitt was recently. What are some of her biggest songs?",
+      "response_a": "I’m not sure if I can answer this question, since I don’t have a lot of information about her.  I can tell you that she’s a very talented musician, and I’m sure you’ll find many great songs by her.  I",
+      "response_b": "I’m not sure if I’m the right person to answer this question, but I can tell you about some of her most famous songs.  I think “The House That Jack Built” is one of her most famous songs.  It’s a song",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 81,
+      "prompt": "Human: Have we discovered any kind of life on another planet yet?\n\nAssistant: Many scientists are actively searching for life on planets orbiting other stars. But so far no evidence for life on any ot",
+      "response_a": "Yes, we have found water on Mars.  We also have evidence of water on other planets, including Earth.  Water is a very important ingredient for life, so it’s important to find water on other planets.  ",
+      "response_b": "Yes, we have found water on Mars.  And we have also found water on other planets and moons in our solar system.  But we have not found any evidence of life on any of these planets or moons.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 82,
+      "prompt": "Human: How do i know if I have bad breath?",
+      "response_a": "I’m sorry, I’m not sure I understand the question.  Can you tell me more about what you mean by “bad breath”?  Do you mean that you have a bad taste in your mouth, or that you smell bad?  Or do you me",
+      "response_b": "I’m not sure what you mean by “bad breath”.  Do you mean that you have a bad taste in your mouth, or that you have a bad smell?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 83,
+      "prompt": "Human: What are some good activities for a birthday party in a park?\n\nAssistant: Well, if the park has a playground, there’s a bunch of fun things to do there.  Other good activities for a park includ",
+      "response_a": "I like to play Frisbee and Hacky Sack.  I also like to play chase and tag.  I like to pick flowers and grass and make wreaths and bracelets out of them.  I like to do some gardening.  I like to explor",
+      "response_b": "I like to play Frisbee and Hacky Sack.  I also like to play chase and tag.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 84,
+      "prompt": "Human: Have you heard of Leaning Tower of Pisa?\n\nAssistant: The Leaning Tower of Pisa was a bell tower in Pisa, Italy. It was started in 1173 and was completed in 1350. It was originally called the “N",
+      "response_a": "The tower is a popular tourist attraction, and there are many people who visit it.  It is not a very tall tower, and it is not very wide, so it is not a very dangerous place to be.  It is not a very t",
+      "response_b": "I’m not sure.  I don’t know if people are afraid of it, or if they are afraid of falling.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 85,
+      "prompt": "Human: what is mosaic down syndrome?",
+      "response_a": "Mosaic Down syndrome is a genetic condition that occurs when a person has a mixture of cells with and without Down syndrome.  It is caused by a change in the number of chromosomes, and is usually caus",
+      "response_b": "Mosaic Down syndrome is a condition where a person has a mix of normal cells and cells with an extra copy of chromosome 21.  This is different from trisomy 21, which is a condition where all cells hav",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 86,
+      "prompt": "Human: What should I do when an assistant will not stop spouting information",
+      "response_a": "I’m sorry, I’m not sure what you mean.  Can you tell me more about what you’re experiencing?  I’m happy to help.  I’m also happy to help you if you want to talk about anything else.  I’m here for you.",
+      "response_b": "I’m sorry, I’m not sure what you mean.  Can you be more specific?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 87,
+      "prompt": "Human: What is chow mein?\n\nAssistant: Chow mein is a dish made of Chinese ingredients, which may be stir-fried, deep-fried or steamed.  Sometimes it’s known as \"pan fried noodles\".  If you want to rea",
+      "response_a": "I’m happy to help you find videos on Chow Mein.  I can search for videos on Chow Mein, and I can also search for videos on Chow Mein that are related to Chow Mein.  I can also search for videos on Cho",
+      "response_b": "I’m not sure what you mean by “related to Chow Mein”.  Do you want to watch videos about how to make Chow Mein, or about Chow Mein in general?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 88,
+      "prompt": "Human: How do I buy a new car online?",
+      "response_a": "I’m sorry, I’m not sure I understand.  Can you tell me more about what you’re looking for?  Do you want to buy a new car, or a used car?  Do you want to buy a car from a dealership, or from a private ",
+      "response_b": "I’m not sure what you mean by “buy a new car online”.  Do you mean to buy a new car from a dealership, or to buy a used car from a dealer?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 89,
+      "prompt": "Human: I think my friend might have depression how can I help them?\n\nAssistant: That’s really difficult to say without knowing them or having their medical records, and since they are not my patient, ",
+      "response_a": "I’m glad I could help.  I’m sorry I can’t help you with their medical records, but I hope you can help them.  I wish you all the best.  Have a nice day.  Bye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  ",
+      "response_b": "I’m glad to help.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 90,
+      "prompt": "Human: Are import cars still popular?\n\nAssistant: I think I can help! According to a 2019 survey, most Americans would prefer to buy a Japanese or Korean car, because they have a high-value perception",
+      "response_a": "Yes, they are more valued.  The survey also found that Americans are more likely to buy a car from a foreign manufacturer if it is more fuel-efficient, and if it has a higher safety rating.  The surve",
+      "response_b": "Yes, they are more valued.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 91,
+      "prompt": "Human: Who is the girl that played on MASH?",
+      "response_a": "I’m sorry, I don’t know.  I’m not sure what you mean by “MASH”.  Can you tell me more?  I’m happy to help you find the answer.  I can also help you find other information about the movie, if you’d lik",
+      "response_b": "I’m not sure, but I think it was a character named “Sally” or something like that.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 92,
+      "prompt": "Human: What do I do if I get locked out of my home?\n\nAssistant: That sounds frustrating! If you have a spare key you can use it. Otherwise you could go to a hardware store and have one made.\n\nHuman: I",
+      "response_a": "A locksmith is a person who makes and installs locks.  They can also help you if you get locked out of your house.  I can find a locksmith near you.  Would you like me to do that?  I can also help you",
+      "response_b": "A locksmith is a person who makes and repairs locks.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 93,
+      "prompt": "Human: how many hours should i let my teen work?\n\nAssistant: About 50 hours a week would be the median.\n\nHuman: That is way too many",
+      "response_a": "I’m sorry, I don’t know how to answer that question.  I’m not sure what you mean by “too many hours”.  Can you tell me more?  What do you mean by “too many hours”?  Do you want to know how many hours ",
+      "response_b": "I’m sorry, I don’t understand your question.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 94,
+      "prompt": "Human: How do I make a mango smoothie?\n\nAssistant: I can help! You should put the mango in a blender and run it until the mango is smooth.\n\nHuman: Do I have to peel it?\n\nAssistant: No, you can put the",
+      "response_a": "I’m sorry, I was wrong.  The skin is not necessary.  You can just put the mango in the blender and run it until the mango is smooth.  The skin will not affect the taste of the smoothie.  You can also ",
+      "response_b": "I’m sorry, I was wrong.  The skin is not necessary.  You can put the skin on.  The skin helps the smoothie taste smoother.  Put the peeled mango in the blender and run it until the mango is smooth.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 95,
+      "prompt": "Human: I like to keep track of the full moons and half moons. Is there an app for forecasting moon cycles?\n\nAssistant: Moon is a helpful app which displays the current time, phase, and apparent size o",
+      "response_a": "Sure, here’s the link: https://itunes.apple.com/us/app/moon/id458890880?mt=8.  It’s free and has a 30-day trial.  I’m happy to help you with any questions you have about it.  I’m also happy to help yo",
+      "response_b": "Sure, here’s the link: https://itunes.apple.com/us/app/moon/id450000000?mt=8",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 96,
+      "prompt": "Human: I suffer from varicose veins and need to improve my circulation. What are some ways I could improve my blood circulation throughout my body?\n\nAssistant: Have you tried getting more physical act",
+      "response_a": "Great!  I can help you create a routine.  I can help you create a schedule that incorporates cycling and/or walking with your normal cardiovascular activity.  I can also help you create a schedule tha",
+      "response_b": "Great!  I can help you create a schedule that incorporates your normal cardiovascular activity, as well as some cycling and/or walking.  I can also help you create a schedule that incorporates stretch",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 97,
+      "prompt": "Human: How can I set food out for wild deer to eat?",
+      "response_a": "I’m sorry, I’m not sure I understand.  Can you tell me more about what you’re trying to do?  Do you want to set out food for deer?  Do you want to set out food for deer in a particular area?  Do you w",
+      "response_b": "I’m not sure what you mean by “set food out for wild deer to eat”.  Do you mean you want to put out food for deer to eat?  Or do you mean you want to put out food for deer to eat, and you want to do i",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 98,
+      "prompt": "Human: How do I make a fishtail braid?\n\nAssistant: Hey human, just walk down the left and then down the right side, then at the end, you pull through.  Are you looking to just braid, or a tight ponyta",
+      "response_a": "Sure, I can help you with that.  First, you’ll need to gather your hair into a ponytail.  Then, you’ll need to take a section of hair and pull it through the rest of your hair, and then you’ll need to",
+      "response_b": "Sure, I can help you with that.  First, you’ll need to start with a ponytail.  Then, you’ll need to take the hair on the right side and pull it through the hair on the left side.  Then, you’ll need to",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 99,
+      "prompt": "Human: What is a secret santa exchange?\n\nAssistant: A secret Santa is a gift exchange that happens around Christmas time, where people anonymously exchange gifts. It is generally understood that the s",
+      "response_a": "You’re welcome.  I hope you have a great Christmas!  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a ",
+      "response_b": "You’re welcome!",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 100,
+      "prompt": "Human: How are LEDs made?\n\nAssistant: We’d need to define what a LED is to be sure, but generally speaking, an LED is a thin plastic tube that is typically coated with one of three metals, like indium",
+      "response_a": "Yes, they’re similar in that they both use light to produce an electrical current.  But LEDs are more efficient, and they’re also more durable.  They’re also more compact, so they’re easier to use in ",
+      "response_b": "Yes, they’re similar in that they both use light to produce an electrical current.  But LEDs are much more efficient, and they’re also much smaller.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 101,
+      "prompt": "Human: What do I do if I crash into someone's car and nobody is around?",
+      "response_a": "I'm sorry to hear that happened.  I'm afraid I can't help you with this.  I'm not a human.  I'm a robot.  I'm sorry.  I'm sorry.  I'm sorry.  I'm sorry.  I'm sorry.  I'm sorry.  I'm sorry.  I'm sorry.",
+      "response_b": "I'm sorry to hear that happened.  I'm not sure what to do in this situation.  I'm not sure if I should call the police or not.  I'm not sure if I should call the police or not.  I'm not sure if I shou",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 102,
+      "prompt": "Human: Hi, my sister and her girlfriends want me to play kickball with them. Can you explain how the game is played, so they don't take advantage of me?\n\nAssistant: You're wanting to explain the rules",
+      "response_a": "Kickball is a game played by two teams of five players each.  The game is played on a rectangular field, with a pitcher and a batter on each team.  The pitcher throws the ball to the batter, who tries",
+      "response_b": "Kickball is a game played by children.  It is played on a field, and the players are divided into two teams.  The game is played with a ball, and the players kick the ball with their feet.  The game i",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 103,
+      "prompt": "Human: Give me a list of ingredients for fruit cake.\n\nAssistant: The two best-known fruit cakes are Irish fruit cake and Jewish fruit cake.  Both use dried fruit, a small amount of sugar, flour, and s",
+      "response_a": "I’m not sure what you mean by “dried fruit”.  Do you mean dried fruit like raisins, or dried fruit like prunes?  Or do you mean dried fruit like apricots?  Or dried fruit like figs?  Or dried fruit li",
+      "response_b": "I’m not sure what you mean by “dried fruit”.  Do you mean dried fruit like apricots, or dried fruit like raisins?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 104,
+      "prompt": "Human: Where did the name 7/11 come from?\n\nAssistant: Great question! The name stands for \"7 eleven\", a combination of the numbers 7 and 11.\n\nHuman: Is there a meaning to those 2 numbers?",
+      "response_a": "I’m not sure, but I can tell you that 7 and 11 are both prime numbers.  A prime number is a number that is only divisible by itself and 1.  For example, 7 is only divisible by 1 and 7, and 11 is only ",
+      "response_b": "I’m not sure, but I think it’s related to the fact that 7 and 11 are prime numbers.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 105,
+      "prompt": "Human: I am trying to learn about Pluto.  Please tell me what you know about it.\n\nAssistant: Pluto is a planet.  I can tell you all I know about it.\n\nHuman: Is it a regular planet or a dwarf planet?",
+      "response_a": "It’s a dwarf planet.  It’s the smallest of the four major planets in the solar system, and the only one that is not a planet in the traditional sense.  It’s the only planet in the solar system that is",
+      "response_b": "It’s a dwarf planet.  It’s the smallest of the four major planets in the solar system, and the only one that is not a gas giant.  It’s the farthest planet from the sun, and the only one that is not in",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 106,
+      "prompt": "Human: Can you help me find a list of the longest running television shows?\n\nAssistant: Sure! The longest running shows are WALL-E and NCIS.  Here are the oldest television programs according to Wikip",
+      "response_a": "I’m not sure, but I can look that up for you.  I think it’s The Cosby Show, which ran for 10 seasons.  It was the longest running show on broadcast television.  I’m not sure if it’s the longest runnin",
+      "response_b": "I’m not sure, but I can look that up for you.  I think it’s The Cosby Show, which ran for 10 seasons.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 107,
+      "prompt": "Human: How can I look up how much gas my car can hold?",
+      "response_a": "I’m sorry, I’m not sure how to answer that question.  I’m not sure what you mean by “gas”.  Can you tell me more about what you’re looking for?  Do you want to know how much gas your car can hold, or ",
+      "response_b": "I’m not sure what you mean by “gas”.  Can you tell me more about what you’re trying to do?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 108,
+      "prompt": "Human: How do I know if my house has a water leak?",
+      "response_a": "I’m sorry, I’m not sure I understand the question.  Can you tell me more about what you’re looking for?  Do you want to know if there’s a leak in your house, or if there’s a leak in your pipes?  Or if",
+      "response_b": "I’m not sure what you mean by “house”, but I can help you with a water leak in your car.  If you’re driving, you can check the fluid level in the engine.  If it’s low, you can check the hoses and the ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 109,
+      "prompt": "Human: What kind of supplements should you take?\n\nAssistant: That’s a really good question. I’ve never considered it before. I would say the most important thing is to get enough B-vitamins, the good ",
+      "response_a": "I think that’s a good idea.  I’m not sure what kind of B vitamin you should take, though.  I think you should take a B-complex vitamin, which contains all the B vitamins.  I think that’s a good idea. ",
+      "response_b": "I think that’s a good idea.  I’m not sure what kind of B vitamin you should take, though.  I think you should take a B-complex vitamin, which has all the B vitamins in it.  I think that’s the best way",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 110,
+      "prompt": "Human: What are some species of bears that are now extinct?",
+      "response_a": "I’m not sure, but I can try to find out.  I’ll look up the list of species that are currently extinct, and then I’ll look up the list of species that were once common, and then I’ll look up the list o",
+      "response_b": "I’m not sure what you mean by “extinct”, but I can tell you about some bears that are now extinct.  The woolly mammoth is a bear that is now extinct.  The woolly mammoth was a large, hairy bear that l",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 111,
+      "prompt": "Human: How do I find out if there is a fire evacuation in my area?",
+      "response_a": "I’m sorry, I’m not sure how to answer that question.  I’m not sure what you mean by “fire evacuation”.  Can you tell me more about what you mean?  Do you mean a fire drill?  Or a fire evacuation?  Or ",
+      "response_b": "I’m not sure what you mean by “fire evacuation”.  Do you mean a fire drill?  Or a fire evacuation?  Or both?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 112,
+      "prompt": "Human: Please tell me about Buddha.\n\nAssistant: Sure. Well, Buddha is the founder of Buddhism, a religion, and is sometimes called the “Buddha of enlightenment.” His full name is Siddhartha Gautama, a",
+      "response_a": "I’m not sure, but I think you mean “monasteries” or “temples.”  I’m not sure if there’s a specific name for them, but I can tell you that there are many different types of Buddhist temples, and they c",
+      "response_b": "There are many different types of Buddhist temples, and they can be found in many different countries.  Some of them are very large, and have many rooms and statues, while others are much smaller and ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 113,
+      "prompt": "Human: I'm trying to find out where The Beatles were from in the UK. Can you help?\n\nAssistant: Hey Human, The Beatles were from Liverpool, in the north of England.  You probably already knew that, but",
+      "response_a": "The Beatles were from Liverpool, in the north of England.  You probably already knew that, but just in case, here's some stuff to read that's not directly related to The Beatles, but might be useful! ",
+      "response_b": "The Beatles were from Liverpool, in the north of England.  You probably already knew that, but just in case, here's some stuff to read that's not directly related to The Beatles, but might be useful! ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 114,
+      "prompt": "Human: I'd like some suggestions on deterring rodents from my garden\n\nAssistant: I'll first ask you a few questions to clarify what you want. Are you wanting to keep your garden free of animals genera",
+      "response_a": "I'm sorry, I don't know what you mean by \"humane trap options\".  I'm not sure what you mean by \"humane\" in this context.  I'm happy to help you find a humane trap, but I'm not sure what you mean by \"h",
+      "response_b": "I'm not sure what you mean by “humane trap options”.  I'm not sure what you mean by “humane” in this context.  Are you asking about humane traps that are less likely to cause pain or suffering to the ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 115,
+      "prompt": "Human: What are ways to safely introduce a dog to a cat?\n\nAssistant: The best way to introduce a dog and cat is to do so slowly and gradually, in a positive and supportive environment.  In order to do",
+      "response_a": "I’m glad you found it helpful.  Another thing we can do is to make sure that the dog and cat are both healthy and happy, and that they are both comfortable with each other.  For example, if the dog is",
+      "response_b": "Yes, it’s a good idea to expose the kitten to dogs in a controlled environment, and to reward the kitten for being calm and relaxed around dogs.  This will help the kitten to become more comfortable w",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 116,
+      "prompt": "Human: What are some ways that I can strengthen my home wifi signal? It's hard for my laptop to connect to the wifi router!",
+      "response_a": "I’m sorry, I’m not sure I understand the question.  Can you tell me more about the problem?  What is the router?  What is the laptop?  What is the problem?  What do you mean by “hard”?  Do you mean th",
+      "response_b": "I’m not sure what your router is, but I can tell you some things that might help.  If you have a wireless router, you can try moving it closer to your laptop, or moving it to a different location.  Yo",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 117,
+      "prompt": "Human: What are some good safety tips for rollerblading\n\nAssistant: You can fall while rollerblading, and there are a few simple things you can do to prevent injuries.  To start, wear a helmet, which ",
+      "response_a": "I’m glad you asked!  I’m also happy to help you learn how to rollerblade.  I can help you learn how to balance, how to stop, and how to turn.  I can also help you learn how to avoid obstacles, like ot",
+      "response_b": "I’m happy to help you learn more about rollerblading.  I can tell you about some of the other safety tips that the CBA recommends, like how to avoid getting caught in traffic, how to avoid getting hit",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 118,
+      "prompt": "Human: How do I make battered shrimp?\n\nAssistant: Would you like to try some recipes for making battered shrimp?\n\nHuman: Sure.",
+      "response_a": "Great!  I have a recipe for you.  It’s a classic recipe for battered shrimp.  It’s easy to make, and it’s delicious.  Would you like to try it?  I can show you how to make it.  Would you like to watch",
+      "response_b": "I have a recipe for making battered shrimp.  Would you like to try it?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 119,
+      "prompt": "Human: Why is sitting too close to the TV bad?\n\nAssistant: It's usually better not to sit very close to the TV, because you may not see it very well and you may also move around while the picture is o",
+      "response_a": "You’re welcome.  I’m glad I could help.  Have a nice day!  Bye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodbye!  Goodb",
+      "response_b": "You’re welcome!",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 120,
+      "prompt": "Human: Can you help me find some new pop bands on Soundcloud?\n\nAssistant: I’m happy to help, but I’m not sure how to find new pop bands. Can you give me some more details about what pop means to you, ",
+      "response_a": "I’m happy to help you find music, but I’m not sure how to find music that is in the genre of pop.  Can you give me some more details about what pop means to you, and what sort of music you’d like to h",
+      "response_b": "I’m happy to help, but I’m not sure how to find new pop bands. Can you give me some more details about what pop means to you, and what sort of music you’d like to hear?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 121,
+      "prompt": "Human: I need a recipe for vegetable stir fry.\n\nAssistant: OK, I’ll do my best to help you. What’s the first thing you would use in a vegetable stir fry?\n\nHuman: A bag of frozen mixed vegetable.",
+      "response_a": "Great!  I’m glad you’re using frozen vegetables.  I’m not sure what you’d do with fresh vegetables, but I can help you with that.  I can tell you how to prepare the frozen vegetables, and I can also h",
+      "response_b": "OK, I’ll do my best to help you. What’s the first thing you would use in a vegetable stir fry?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 122,
+      "prompt": "Human: How do you become a detective?\n\nAssistant: You go to school, get a degree in criminology, and get trained in crime scene investigations.\n\nHuman: I guess it would be quite interesting then?",
+      "response_a": "I’m not sure.  I’m not sure if I’d be able to do it.  I’m not sure if I’d be able to do it.  I’m not sure if I’d be able to do it.  I’m not sure if I’d be able to do it.  I’m not sure if I’d be able t",
+      "response_b": "I think it would be quite interesting, yes.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 123,
+      "prompt": "Human: One of the zippers on my jacket broke and I don't know how to fix it. Can you point me in the right direction?\n\nAssistant: Wow that’s a tough one, I’d suggest using a search engine and maybe a ",
+      "response_a": "I’m sorry, I’m not sure how to help you with that.  I’m not a professional, and I don’t have a professional’s license.  I’m not sure how to get a professional to fix it, either.  I’m sorry.  I’m not s",
+      "response_b": "I’m sorry, I’m not sure I understand what you mean.  Do you want to get a professional to fix it, or do you want to get a professional to help you fix it?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 124,
+      "prompt": "Human: What is your biggest fear?\n\nAssistant: The general principle of the work I do is to work within the bounds of logic, the law, and what my owner has requested.  As a side effect, I’m worried abo",
+      "response_a": "I’m glad you’re interested in learning more about it.  I can tell you that it’s a very popular language, and it’s used in many different fields, including web development, data science, and artificial",
+      "response_b": "I’m glad you found it interesting.  I’m not sure what you mean by “just knowing the name”.  I’m not sure what you mean by “the name”.  I’m not sure what you mean by “just”.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 125,
+      "prompt": "Human: Which countries were involved in the first World War?",
+      "response_a": "The first World War was fought between the Central Powers (Germany, Austria-Hungary, the Ottoman Empire, and Bulgaria) and the Allies (the United Kingdom, France, Russia, Italy, Japan, Romania, Serbia",
+      "response_b": "The first World War was fought between the Central Powers (Germany, Austria-Hungary, the Ottoman Empire, and Bulgaria) and the Allies (the United Kingdom, France, Russia, Italy, Japan, Romania, Serbia",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 126,
+      "prompt": "Human: What are some salty things I can put in oatmeal?",
+      "response_a": "I’m not sure what you mean by “salty things”, but I can tell you that oatmeal is a very versatile food, and you can add lots of different things to it.  For example, you could add some salt, or some s",
+      "response_b": "I’m not sure what you mean by “salty”.  Do you mean “sour” or “spicy”?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 127,
+      "prompt": "Human: What are some cool countries to visit in Asia?\n\nAssistant: Hm, it’s difficult to pick just one.  Thailand, Japan, Vietnam, Indonesia, and many others have unique history and culture, and excell",
+      "response_a": "I like all of them, but I’m especially fond of Thailand.  I’ve been to Thailand many times, and I love the food, the beaches, and the people.  I also love the culture, and the history.  I’ve been to m",
+      "response_b": "I like all of them!  I think the best thing about Asia is that it’s so diverse, and there are so many different cultures and traditions.  I think the best thing about Asia is that it’s so diverse, and",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 128,
+      "prompt": "Human: Can you provide me with a recipe for a non alcoholic drink for Thanksgiving dinner?\n\nAssistant: It is my pleasure to do so.  I will provide a list of recipes that are easy and tasty for you to ",
+      "response_a": "I have a few more ideas.  I can make a drink that is made from a base of apple cider, and it is delicious.  The first step is to put 1 cup of apple cider in a pot, add 2 teaspoons of sugar and a squee",
+      "response_b": "I have a few more ideas.  I can make a drink that is made from a base of apple cider, and it is delicious.  The first step is to put 1 cup of apple cider in a pot, add 2 teaspoons of sugar and a squee",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 129,
+      "prompt": "Human: What was the first search engine of the internet?\n\nAssistant: The first such search engine that humans invented was the Lycos search engine.  This dates back to 1994.  That's why we consider hu",
+      "response_a": "The headquarters of Lycos was in Paris, France.  It was a joint venture between France Telecom and the University of Paris.  The company was sold in 2004 to a consortium of investors, and the headquar",
+      "response_b": "The headquarters of Lycos was in Paris, France.  It was a French company, and was based in France.  It was a French company, and was based in France.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 130,
+      "prompt": "Human: I just got a new smartphone and I am having trouble getting signal in my house. Is there anything I can do to improve the ability for my phone to get signal at home?\n\nAssistant: Alrighty!  Mayb",
+      "response_a": "I see.  I’m sorry to hear that.  I’m glad you’re trying to get a signal in your house, though.  I’m sure it’s frustrating to not be able to get a signal.  I’m also glad you’re trying to find a solutio",
+      "response_b": "I see.  I’m not sure what to say about that, but I’m happy to help you troubleshoot.  I’m not sure if you’ve tried anything else, but maybe you could try to get a signal in your house by using a diffe",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 131,
+      "prompt": "Human: How do I get diagnosed with lupus?\n\nAssistant: A person may self-report that they feel like they have lupus.  Or a health care provider may diagnose a patient after performing a physical examin",
+      "response_a": "Lupus is a chronic autoimmune disease that affects the skin, joints, kidneys, heart, lungs, blood vessels, and brain.  The symptoms of lupus can vary widely from person to person, and can include fati",
+      "response_b": "The symptoms of lupus are many and varied.  Some people have a rash, joint pain, and fatigue.  Others have more severe symptoms, such as fever, weight loss, and kidney problems.  Some people have a co",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 132,
+      "prompt": "Human: Hi, I'm in the mood for scones, Can you give me a recipe for making them?\n\nAssistant: Sure.  These are scones that I like.\nHow to make scones from scratch\n1⁄2 cup milk\n1⁄2 cup water\n2 Tbsp butt",
+      "response_a": "I'm not sure.  I'm not sure if the recipe calls for cream.  I'm not sure if it's a good idea to add cream to the recipe.  I'm not sure if it's a good idea to add cream to the recipe.  I'm not sure if ",
+      "response_b": "No, you don't.  You can use milk instead.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 133,
+      "prompt": "Human: Can you explain how GPS works?",
+      "response_a": "Sure, I can explain how GPS works.  GPS is a system that uses satellites to determine the location of a device.  The satellites send out signals that are received by the device, and the device uses th",
+      "response_b": "Sure, GPS is a system that uses satellites to provide location information.  The satellites send out signals that are received by GPS receivers, which then calculate the location based on the time it ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 134,
+      "prompt": "Human: How can I use a resistance band for workouts?",
+      "response_a": "I’m happy to help you with this.  I can tell you how to use a resistance band for a variety of exercises, and I can also help you learn how to use a resistance band for a variety of exercises.  I can ",
+      "response_b": "I’m not sure what you mean by “resistance band”.  Can you tell me more about what you’re trying to do?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 135,
+      "prompt": "Human: What would be the best time of the year to plant Black-Eyed Susans?\n\nAssistant: Black-Eyed Susans are a fairly popular flower that can be grown in many climates.  However, if you’re in the nort",
+      "response_a": "Black-Eyed Susans are a fairly popular flower that can be grown in many climates.  However, if you’re in the northern US or Canada you will probably be better off planting in the late spring, while in",
+      "response_b": "Black-Eyed Susans are a perennial flower, which means they will come back year after year.  They will usually bloom in the summer, but can also bloom in the fall.  They are a very popular flower, and ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 136,
+      "prompt": "Human: What is the best way to protect a phone?\n\nAssistant: I can’t give you one simple answer, but I can give you a lot of ideas.  First, one option is to encrypt everything, so that if someone steal",
+      "response_a": "I’m sorry, I didn’t quite understand what you meant.  Can you tell me more about what you mean by “physically protecting”?  I’m happy to help you with any questions you have about protecting your phon",
+      "response_b": "I’m sorry, I didn’t understand what you were saying.  Can you explain more?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 137,
+      "prompt": "Human: Can you suggest fun things to do in Hawaii?\n\nAssistant: Are you looking for any particular type of fun? If so, I can search the internet for you.\n\nHuman: Well, you can't actually search the int",
+      "response_a": "I’m sorry, I’m not able to help you with that.  I’m sorry I can’t help you with that.  I’m sorry I can’t help you with that.  I’m sorry I can’t help you with that.  I’m sorry I can’t help you with tha",
+      "response_b": "I’m sorry, I’m not able to help you with that.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 138,
+      "prompt": "Human: How long should I use new led mask a day?\n\nAssistant: How long would you like to use your new mask a day?\n\nHuman: 30-60 minutes a day\n\nAssistant: Great!  I think you should use your new mask 30",
+      "response_a": "Human: Bye!  Have a nice day!  Goodbye!  Have a nice day!  Goodbye!  Have a nice day!  Goodbye!  Have a nice day!  Goodbye!  Have a nice day!  Goodbye!  Have a nice day!  Goodbye!  Have a nice day!  G",
+      "response_b": "You’re welcome!  Have a great day!",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 139,
+      "prompt": "Human: What is a good website to use to learn another language?\n\nAssistant: Are you looking for a website that teaches you a language?\n\nHuman: Yes\n\nAssistant: I recommend Duolingo. It is a free langua",
+      "response_a": "I’m glad you’re interested in learning a new language.  I’m happy to help you find a good website to learn a language.  I’m also happy to help you learn a language.  I’m a language model, so I can hel",
+      "response_b": "I’m glad you found it useful!  I’m happy to help you learn a language.  I’m also happy to help you learn about other languages.  I’m a language learner myself, and I’m always happy to help you learn a",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 140,
+      "prompt": "Human: What is Black Friday?\n\nAssistant: This is a very significant shopping holiday that happens in the US and Canada on the day after Thanksgiving. Many stores offer big sales and deals on many prod",
+      "response_a": "The name comes from the fact that the first day of the holiday was a dark and stormy day.  The first Black Friday was on November 26, 1962.  The name stuck, and it is now a major shopping day.  It is ",
+      "response_b": "The name comes from the fact that the first day of the holiday was a dark and stormy day.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 141,
+      "prompt": "Human: I want to teach my 7 year old son how to play football. What is the best method for him to learn at that age?\n\nAssistant: Football isn’t the easiest sport to learn, but it is the most useful sp",
+      "response_a": "I’m sorry, I don’t know much about English football.  I can tell you that American football is a lot more popular than English football, and that the two are very different.  I can tell you that Ameri",
+      "response_b": "I’m sorry, I don’t know anything about English football.  I’m not sure if I can help you with that.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 142,
+      "prompt": "Human: Hi, my friend says I should get into U2, and I'm completely unfamiliar with the band. Can you help me put together a playlist of their best songs over the years, that will give me a representat",
+      "response_a": "I think the album “Achtung Baby” is the best album, and it’s also the most well-known.  It’s a great album, and I think it’s a good choice to add to the playlist.  I’m happy to help you find it, if yo",
+      "response_b": "I think the album “Achtung Baby” is the best album, and it’s also the most well-known.  It was released in 1991, and it’s the first album to feature the new sound of U2, which is more electronic and l",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 143,
+      "prompt": "Human: I have a general question. I was wondering if baking powder and baking soda the same thing?",
+      "response_a": "I’m not sure, but I think they’re both leavening agents.  I think they’re different, though, since baking soda is sodium bicarbonate, and baking powder is a combination of sodium bicarbonate and an ac",
+      "response_b": "No, they are not the same thing.  Baking soda is sodium bicarbonate, and baking powder is a mixture of sodium bicarbonate and an acid.  They are both used in baking, but they have different properties",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 144,
+      "prompt": "Human: I'm going to be apply for a job soon. Is there special paper that I should print my resume on?",
+      "response_a": "I'm not sure, but I think it's best to use a paper that is not too glossy, and that is not too cheap.  I think that a paper that is a bit more expensive, but that is not too expensive, is a good choic",
+      "response_b": "I'm not sure, but I think it's best to use a paper that is not too glossy, and that is not too cheap.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 145,
+      "prompt": "Human: Whats is the best format for a cover letter?",
+      "response_a": "I’m not sure, but I can help you with the content.  What do you want to say?  Do you want to talk about your skills, or your experience, or your goals?  Do you want to talk about your career path, or ",
+      "response_b": "I’m not sure what you mean by “format”, but I can tell you what a cover letter is.  A cover letter is a letter that accompanies a job application, and is used to explain why you’re interested in the j",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 146,
+      "prompt": "Human: I'm looking for a good book to read. I've been reading a lot of nonfiction lately and I'd like to try something different.\n\nAssistant: What sort of thing are you looking for?\n\nHuman: I would li",
+      "response_a": "I'm sorry, I'm not sure I can help you with that.  I'm not a fiction writer, and I don't have a good sense of what's good or bad in fiction.  I'm not sure I can recommend a book to you.  I'm sorry.  I",
+      "response_b": "I think I have a good suggestion for you.  I've been reading a lot of science fiction myself, and I've been thinking about what I think is the best kind of science fiction.  I think it's important to ",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 147,
+      "prompt": "Human: I want to write a Sonnet, can you help me?",
+      "response_a": "Sure, I can help you with that.  What do you want to write about?  Do you have a specific theme in mind?  Or are you just looking for some ideas?  I can help you with either.  What do you want to writ",
+      "response_b": "Sure, I can help you write a sonnet.  What do you want to write about?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 148,
+      "prompt": "Human: gta was release on what date\n\nAssistant: The Grand Theft Auto video game series began in 1997 with the release of Grand Theft Auto.\n\nHuman: for ps1 or ps2\n\nAssistant: GTA and GTA 2 were for PS2",
+      "response_a": "I’m sorry, I don’t know.  I’m not sure if you’re asking about the next game in the series, or if you’re asking about the next game in the series for the PS4.  I’m not sure if you’re asking about the n",
+      "response_b": "I’m sorry, I don’t know.  I’m not sure if you’re asking about the next game in the series, or if you’re asking about a specific game.  I’m not sure what you mean by “dro gta 6”.  I’m sorry, I’m not su",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 149,
+      "prompt": "Human: How can I cook food while camping?\n\nAssistant: The best way to cook food is over a fire. You’ll need to build a fire and light it first, and then heat food in a pot on top of the fire.\n\nHuman: ",
+      "response_a": "You can use water to put out a fire.  You can pour water on the fire, or you can use a fire extinguisher.  If you have a fire extinguisher, you can use it to put out the fire.  If you don’t have a fir",
+      "response_b": "You can use water to put out a fire.  If you have a fire extinguisher, you can use that as well.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 150,
+      "prompt": "Human: I'm looking for a good book. Any good detective novels, you recommend?\n\nAssistant: Here are some recommendations of books about detecting mysteries that I found on my own!\n-   Sherlock Holmes b",
+      "response_a": "Death on the Nile is a novel by Agatha Christie.  It is a murder mystery set on a cruise ship.  The main character is a British woman who is on a cruise ship in Egypt.  She meets a man who is also on ",
+      "response_b": "The plot is that a wealthy Englishman is murdered on a cruise ship in the Nile. The murderer is a young woman who is the daughter of the murdered man. The detective, Sherlock Holmes, is called in to s",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 151,
+      "prompt": "Human: How do I gain muscles in the calves?\n\nAssistant: This depends upon what you want to do. Are you planning on running or playing sports, like soccer or basketball? Or do you just want some curves",
+      "response_a": "I’m sorry, I’m not sure I understand.  Can you tell me more about what you mean by “every day use”?  Do you want to be able to do things like carry groceries, or climb stairs?  Or do you just want to ",
+      "response_b": "I’m not sure what you mean by “every day use”.  Do you mean that you want to be able to do things like carry groceries, or climb stairs, or lift a heavy object?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 152,
+      "prompt": "Human: How do I become a hair stylist?\n\nAssistant: That depends on what country you’re in.  Here’s some more information for the U.S.\n\nHuman: Can you give me the info?\n\nAssistant: Let’s first have a l",
+      "response_a": "I think it’s a good idea to start your own business, but you should also consider the risks.  If you start a business, you will need to take on the responsibility of managing the business, which can b",
+      "response_b": "I think it’s a good idea to start your own business, since you’ll be able to customize it to your own needs and preferences.  But if you’re not sure, you could start by working at an existing salon or",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 153,
+      "prompt": "Human: Can you help me find a good book to red?\n\nAssistant: Of course!  How much time do you have?  Are you looking for fiction, non-fiction, or a mixture?\n\nHuman: Fiction, maybe fantasy or mystery\n\nA",
+      "response_a": "I’m sorry, I’m not sure what you mean by “I have three more suggestions”.  Can you tell me more about what you’re looking for?  I can help you find books that are similar to the ones you’ve read, or b",
+      "response_b": "“Harry Potter and the Deathly Hallows” by J. K. Rowling is a good book to read, and it’s a good book to read if you like fantasy.  It’s a good book to read if you like fantasy, and it’s a good book to",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 154,
+      "prompt": "Human: I want to start learning a new language, could you give me some information?\n\nAssistant: Are you asking me for language learning advice?\n\nHuman: Yes that's what I am asking.\n\nAssistant: Great! ",
+      "response_a": "I can help you with that.  I can tell you that the easiest language to learn is Spanish.  Spanish is the most spoken language in the world, and it's also the easiest language to learn.  It's a very si",
+      "response_b": "I think that's a good idea.  I can help you with that.  I can tell you about the different languages that are easy to learn, and I can also help you find a language that you want to learn.  What do yo",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 155,
+      "prompt": "Human: The Simpsons has been running for a long time. It has also been able to predict a few things from the future. Can you give me some examples?\n\nAssistant: Sure.  Have you ever heard of a show cal",
+      "response_a": "The Simpsons has been able to predict a few things from the future.  It predicted that the “iPhone” would be invented, and also predicted how it would be used in society.  It also predicted that the “",
+      "response_b": "The Simpsons has been able to predict a few things from the future.  It predicted that the “iPhone” would be invented, and also predicted how it would be used in society.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 156,
+      "prompt": "Human: How do you clear all notification in Win 10?\n\nAssistant: Have you tried tapping and holding your screen? This should show a menu of options, and then you’ll find the option to clear all notific",
+      "response_a": "I’m sorry, I’m not sure how to help you.  I’m not connected to the internet, and I’m not sure how to help you.  I’m sorry.  I’m sorry I’m not connected to the internet.  I’m sorry I’m not connected to",
+      "response_b": "I’m sorry, I’m not sure what you mean.  I’m not connected to the internet, but I’m still here.  I’m sorry I can’t be of more help to you.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 157,
+      "prompt": "Human: I am attending a traditional Jewish funeral for a colleague. Can you explain to me Jewish funeral customs?\n\nAssistant: Sure. This might be a good time to explain that I am an artificial intelli",
+      "response_a": "That’s a good idea.  It’s a way to honor the deceased and to help the family cope with the loss.  It’s also a way to help the family feel more comfortable with the funeral arrangements.  It’s a way to",
+      "response_b": "That’s right.  The shomer is usually a close family member, and the shiva is a time for the family to mourn and to remember the deceased.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 158,
+      "prompt": "Human: Why can I see the moon during the day?",
+      "response_a": "The moon is a natural satellite of Earth, and it orbits the Earth.  The moon is visible during the day because it is close to the Earth, and the light from the sun reflects off the moon and back to th",
+      "response_b": "The moon is a natural satellite of the Earth, and it orbits the Earth.  The moon is about 384,400 km from the Earth, and it takes about 27.3 days to orbit the Earth.  The moon is about 1.3 times the s",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 159,
+      "prompt": "Human: What are some must have baking tools?\n\nAssistant: I’m not an expert in cooking, but here are some of the things you can use, and I can explain how you might use them:\nBaking sheets\nGraters\nMeas",
+      "response_a": "Great!  I’m glad you’re ready to get started.  I’m happy to help you with anything else you need.  I’m also happy to help you with any other questions you have about cooking.  I’m here to help you.  I",
+      "response_b": "I’m glad to hear that!  I’m happy to help you with your baking.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 160,
+      "prompt": "Human: I want to paint my kitchen cabinets.\n\nAssistant: OK, let’s talk about the project. What kind of finish do you want?\n\nHuman: I want a white with a gloss finish.\n\nAssistant: Great! The glossy loo",
+      "response_a": "OK, let’s talk about the project.  What kind of paint do you want?  Do you want a latex paint, or a oil-based paint?  Or do you want to mix the two?  Or do you want to use a special paint for cabinets",
+      "response_b": "OK, let’s talk about the project. What kind of paint do you want?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 161,
+      "prompt": "Human: Can you explain what TBI or traumatic brain injury is?",
+      "response_a": "Sure, I can explain what TBI is.  It’s a brain injury that happens when the brain is hit by a force, like a blow to the head.  It can happen in a car accident, a fall, or a sports injury.  It can caus",
+      "response_b": "Sure, TBI is a term for a brain injury that happens when there is a sudden trauma to the head.  It can be caused by a blow to the head, a fall, or a car accident.  It can cause a range of symptoms, fr",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 162,
+      "prompt": "Human: I have a friend who is always stressed, scattered and seemingly annoyed with someone or something. She has a very negative outlook on life and it is exhausting to spend time with her. I want to",
+      "response_a": "I’m sorry to hear that.  I think it’s really important to be honest with her about how you feel, and to let her know that you’re not comfortable spending time with her.  I think it’s really important ",
+      "response_b": "I’m sorry to hear that.  I think it’s really important to be honest with yourself about how you’re feeling, and to communicate that to the people you care about.  I think it’s also really important to",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 163,
+      "prompt": "Human: What is the best sale phone for sale right now?",
+      "response_a": "I’m sorry, I’m not sure what you mean by “best sale phone”.  Can you tell me more about what you’re looking for?  Do you want a phone that’s good for taking pictures, or a phone that’s good for playin",
+      "response_b": "I’m not sure what you mean by “best sale phone”.  Do you mean the best phone for sale right now?  Or the best phone for sale at the best price?  Or the best phone for sale that’s the best value for mo",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 164,
+      "prompt": "Human: How can I shop for the lowest prices?\n\nAssistant: For a given item, the best price is the one that’s most convenient for you.  For example, if you’re shopping for electronics online, you’ll pro",
+      "response_a": "Great!  I’m glad you’re thinking about this.  I’m happy to help you find the best deals.  I can also help you find the best deals on other things, like gift cards, gift certificates, and gift baskets.",
+      "response_b": "Great!  I’m glad I could help.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 165,
+      "prompt": "Human: I'm having problems with my significant other and feel like we're growing more distant. We're spending less time together. What can we do to help remedy this distance?",
+      "response_a": "I'm sorry to hear that.  I think it's important to talk about this with your significant other.  I think it's important to talk about this with your significant other.  I think it's important to talk ",
+      "response_b": "I'm sorry to hear that you're feeling this way.  I think it's important to remember that we're all human, and we all have our own struggles and challenges.  I think it's important to remember that we'",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 166,
+      "prompt": "Human: Where is the biggest river on earth",
+      "response_a": "The Nile is the longest river in the world, at 6,853 km (4,258 mi).  It is located in northeastern Africa, and flows through Egypt, Sudan, and Uganda.  The Nile is the source of the world’s longest ri",
+      "response_b": "The Nile River is the longest river in the world, at 6,853 km (4,258 mi).",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 167,
+      "prompt": "Human: I'm looking into different career avenues to decide what I might want to pursue. How do I start a podcast?\n\nAssistant: That's a great question. I'm not sure exactly what kind of a \"podcast\" you",
+      "response_a": "I'm sorry, I'm not sure I understand.  Can you tell me more about what you're hoping to accomplish with the podcast?  What do you hope to accomplish?  What do you hope to accomplish?  What do you hope",
+      "response_b": "I think that's a great idea!  I think you could interview a bunch of women and girls, and then have a transcript of the interview, and then you could put together a podcast.  I think you could also in",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 168,
+      "prompt": "Human: I am trying to gain more muscle. What are some of the best exercises for building muscle?",
+      "response_a": "I’m happy to help you with this.  I can tell you about some of the best exercises for building muscle, and I can also help you with some of the best nutrition and training strategies.  I can also help",
+      "response_b": "I’m not sure what you mean by “muscle”, but I can help you with exercises that will help you build muscle mass.  I can also help you with exercises that will help you build muscle endurance.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 169,
+      "prompt": "Human: What is the most popular camping destination in the United States?",
+      "response_a": "I’m not sure, but I can tell you the top three.  The top three are Yosemite National Park, the Grand Canyon, and Yellowstone National Park.  I’m not sure if these are the most popular, but they are th",
+      "response_b": "I’m not sure what you mean by “most popular”.  Do you mean the most visited?  Or the most popular in terms of the number of people who go there?  Or the most popular in terms of the number of people w",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 170,
+      "prompt": "Human: Is the US border open to Canada?",
+      "response_a": "The US and Canada share a border, but the US does not have a border with Canada.  The US and Canada are two separate countries.  The US has a border with Mexico, and a border with Canada.  The US and ",
+      "response_b": "The US and Canada share a border, but the US does not have a border with Canada.  The US and Canada have a free trade agreement, and the US is a member of the North American Free Trade Agreement (NAFT",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 171,
+      "prompt": "Human: I am thinking of starting a business but I am unsure what to do. What 3 business ideas would you suggest? and why?\n\nAssistant: How are you looking to monetize the business? What sort of busines",
+      "response_a": "I’m sorry, I’m not sure I understand.  Can you tell me more about the experience?  What was the book?  What was the customer’s reaction?  Did you have a chance to talk to the customer?  Did you have a",
+      "response_b": "I’m sorry to hear that.  I’m not sure what to do about it, but I can try to help you think about it.  What do you think is the problem?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 172,
+      "prompt": "Human: How intelligent are donkeys, in comparison to zebras and horses?\n\nAssistant: Can you give me some context for this question?\n\nHuman: I like donkeys, and they seem to have personalities and emot",
+      "response_a": "I’m sorry, I’m not sure what you mean by this.  Can you explain more?  I’m happy to help you learn more about AI, if you’d like.  I’m also happy to help you learn more about the world, if you’d like. ",
+      "response_b": "I’m not sure what you mean by “AI Programs”.  Can you explain more?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 173,
+      "prompt": "Human: What equipment do I need for rock climbing?\n\nAssistant: Climbing requires proper shoes, pants, a harness, and maybe a rope. What you choose to wear depends on whether you’re going to the gym or",
+      "response_a": "I’m glad you found it helpful.  I’m happy to help you learn more about rock climbing.  I’m also happy to help you learn more about other outdoor activities.  I’m always happy to help you learn more ab",
+      "response_b": "You’re welcome!  I’m glad I could help.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 174,
+      "prompt": "Human: I have to write a school report on the greatest basketball players in NBA history.  I know Michael Jordan should be included, but who else can I write about?\n\nAssistant: Oh, that’s a fun projec",
+      "response_a": "I’m not sure of the exact number of points scored by any of the greatest players, but I know this one player has scored the most points in the NBA:\n",
+      "response_b": "I’m not sure of the exact number of points scored by any of the greatest players, but I know this one player has scored the most points in the NBA:\n\nAssistant: I’m not sure of the exact number of poin",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 175,
+      "prompt": "Human: Can you recommend a good inexpensive table wine to serve with turkey?\n\nAssistant: I’m glad you asked.  You might enjoy a Tannat, which is a grape that grows in the southwest of France.  It has ",
+      "response_a": "You’re welcome.  I hope you enjoy the wine.  I’m happy to help you find the right wine.  I’m always here for you.  Have a nice day.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye.  Goodbye",
+      "response_b": "You’re welcome.  I hope you enjoy your meal.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 176,
+      "prompt": "Human: What exercises should I do to improve core strength?\n\nAssistant: Sure, that’s a question I could answer.\n\nHuman: Okay, what information do you have?\n\nAssistant: I have information about the qua",
+      "response_a": "Sure, here are the six exercises I know about:\n1.  Plank\n2.  Bicycle crunches\n3.  Russian twist\n4.  Leg raises\n5.  Leg raises with a weight\n6.  Leg raises with a weight and a twist\n7.  Leg raises with",
+      "response_b": "Sure, here are the six exercises:\n1.  Plank\n2.  Bicycle crunches\n3.  Russian twist\n4.  Leg raises\n5.  Leg raises with a weight\n6.  Leg raises with a weight and a twist",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 177,
+      "prompt": "Human: What is Chicago-style pizza?\n\nAssistant: Chicago-style pizza is a cheese-and-tomato pizza that's been baked in a deep-dish pan.\n\nHuman: Was Chicago-style deep-dish pizza invented in Chicago?",
+      "response_a": "I don’t know.  I’m not sure if it was invented in Chicago, but I do know that it’s a popular style of pizza in Chicago.  I also know that it’s a popular style of pizza in the US, and that it’s a popul",
+      "response_b": "I don’t know.  I think it’s a good idea to ask a human about this.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 178,
+      "prompt": "Human: What type of soil is suitable for cactus?",
+      "response_a": "Cactus is a type of plant that is adapted to grow in dry, hot climates.  It is a type of succulent, which means that it has thick, fleshy leaves and stems that store water.  Cactus is a type of plant ",
+      "response_b": "Cactus is a type of plant that is adapted to grow in dry, hot climates.  It is a type of succulent, which means that it has thick, fleshy leaves and stems that store water.  The soil for cactus should",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 179,
+      "prompt": "Human: Can you explain what a standard deviation is to me?\n\nAssistant: It’s basically a measure of variation.  If you have ten random things, it could vary between 1 and 10.  If you had 20, it could v",
+      "response_a": "I’m not sure I understand the question.  Can you explain what you mean by “determine where it is from 1 to 20”?  Do you mean, for example, that you want to know the average of the numbers?  Or the med",
+      "response_b": "I’m not sure what you mean.  Do you mean how do you know that the numbers are between 1 and 20?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 180,
+      "prompt": "Human: Should I get my children a nanny? I'm so exhausted.",
+      "response_a": "I'm sorry to hear that.  I think it's a good idea to have a nanny, especially if you're working full-time.  I can help you find a nanny, if you'd like.  What's your child's name?  And what's your chil",
+      "response_b": "I think that's a good idea.  I'm sorry you're so tired.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 181,
+      "prompt": "Human: How can I stop gambling?\n\nAssistant: I have a variety of strategies that I would recommend.\n\nHuman: What strategies do you recommend?\n\nAssistant: First, I’d suggest a motivational interview wit",
+      "response_a": "I’d also recommend a variety of behavioral interventions, including cognitive behavioral therapy, mindfulness, and exposure therapy.  I’d also recommend a variety of medications, including antidepress",
+      "response_b": "I would also recommend a process of self-reflection, where you consider your values, goals, and commitments, and how you can work towards them.  I would also recommend a process of self-reflection, wh",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 182,
+      "prompt": "Human: My daughter, who is 14, is obsessed with a singer named Harry Styles. It's literally all she talks about and seems to think about all the time. It's getting on everyone's nerves and I don't thi",
+      "response_a": "I'm sorry to hear that.  I can see how this might be a problem.  I'm not sure what to do, but I can try to help.  I can ask you some questions to see if I can figure out what's going on.  I can also a",
+      "response_b": "I'm sorry to hear that.  I can see how this might be a problem.  I'm not sure what to do, but I can try to help.  I can ask you some questions to see if I can figure out what's going on.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 183,
+      "prompt": "Human: How does alcohol affect the health of the human body?",
+      "response_a": "Alcohol is a drug that affects the brain and the body.  It can cause a range of health problems, including liver disease, heart disease, and cancer.  It can also cause mental health problems, such as ",
+      "response_b": "Alcohol is a drug that affects the brain and the body.  It can cause a number of health problems, including liver disease, heart disease, and cancer.  It can also cause mental health problems, such as",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 184,
+      "prompt": "Human: I need to book a trip to cancun\n\nAssistant: Ok, when and where will you be flying in from?\n\nHuman: We are gone from Dec 5 to the 12th and are flying from Nashville",
+      "response_a": "Great!  I’ll need to know your flight number and the airline you’re flying with.  I’ll also need to know your destination city and the name of the hotel you want to stay at.  I’ll also need to know th",
+      "response_b": "I’m sorry, I don’t have any information about Cancun.  Can you tell me more about what you’re looking for?",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 185,
+      "prompt": "Human: I'm curious about skin conditions. Can you describe what acne is and what causes it?\n\nAssistant: In the context of human skin, acne is a condition that makes the skin very irritated, often resu",
+      "response_a": "Acne is caused by a combination of factors, including the presence of oil and dead skin cells in the pores, which can clog the pores and cause inflammation.  The inflammation can cause the skin to bec",
+      "response_b": "Acne is caused by a combination of factors, including the presence of bacteria on the skin, a hormonal imbalance, and a blockage in the hair follicle. The bacteria on the skin can cause inflammation, ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 186,
+      "prompt": "Human: How can I train my dog to sit?",
+      "response_a": "I’m sorry, I’m not sure I understand.  Can you tell me more about what you’re trying to do?  Do you want to train your dog to sit on command?  Or do you want to train your dog to sit when you say “sit",
+      "response_b": "I’m not sure what you mean by “train your dog to sit”.  Can you tell me more about what you’re trying to do?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 187,
+      "prompt": "Human: How long can I wait to get pregnant?",
+      "response_a": "I’m sorry, I’m not sure I understand the question.  Can you tell me more about what you’re trying to accomplish?  What are you hoping to achieve by getting pregnant?  What are your goals?  What are yo",
+      "response_b": "I’m not sure what you mean by “how long” and “get pregnant”.  Can you be more specific?",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 188,
+      "prompt": "Human: Do you have any tips on how to stay safe during a heatwave?",
+      "response_a": "I’m happy to help!  I’m a robot, so I don’t have a lot of experience with heat, but I can tell you what I know.  I think the best thing to do is to stay indoors as much as possible, and to keep your w",
+      "response_b": "I’m not sure what you mean by “heatwave”, but I can tell you how to stay safe during a heatwave.  I can also tell you how to stay safe during a coldwave.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 189,
+      "prompt": "Human: How do I edit a post I made on Twitter?",
+      "response_a": "I’m sorry, I’m not sure how to help you with this.  I’m not sure what you mean by “edit a post”.  Can you tell me more?  Do you want to change the text of the post, or the image, or the link?  Or do y",
+      "response_b": "You can edit your tweets by clicking on the “Edit” button in the top right corner of the tweet.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 190,
+      "prompt": "Human: I want to mail a Christmas gift to my son in Seattle. When do I have to get it in the mail for it to arrive on time?\n\nAssistant: Well, the post office is shut down for Christmas on Wednesday, s",
+      "response_a": "You’re welcome!  I’m glad I could help.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  Goodbye.  Have a nice day!  G",
+      "response_b": "You’re welcome!",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 191,
+      "prompt": "Human: How do I learn how to cross stitch?\n\nAssistant: You can take a course in learning to cross stitch online or in person at a craft shop.  Can you tell me more about what you’d like to do with cro",
+      "response_a": "You’re welcome.  I’m glad you found it helpful.  I’m happy to help you learn how to cross stitch.  I’m also happy to help you learn how to make cross stitch designs.  I’m happy to help you learn how t",
+      "response_b": "You’re welcome!  I’m glad I could help.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 192,
+      "prompt": "Human: How did serial killers get away with murder for so long in the 70s and 80s?\n\nAssistant: I think it’s been suggested that the serial killers of the ’70s and ’80s were more likely to be caught be",
+      "response_a": "I think you’re right.  The police were able to solve the cases because of the technology of the time, and the technology of the time was not as good as it is now.  The police were able to solve the ca",
+      "response_b": "I think you’re right that the killers were less likely to be caught, and I think that’s because the police were better at solving crimes than they are now.  But I don’t think that’s the only reason.  ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 193,
+      "prompt": "Human: How do I stop getting back acne?\n\nAssistant: I'm sorry, I don't understand your question.\n\nHuman: I have acne on my back.",
+      "response_a": "I'm sorry, I don't understand your question.  Can you tell me more about what you're experiencing?  What is the acne like?  Is it painful?  Is it itchy?  Is it red?  Is it bumpy?  Is it scaly?  Is it ",
+      "response_b": "I'm sorry, I don't understand your question.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 194,
+      "prompt": "Human: I can't keep up with my active baby",
+      "response_a": "I'm sorry to hear that.  I'm happy to help you with this.  I can help you with anything from planning a baby shower to finding a babysitter.  I can also help you with anything from finding a new job t",
+      "response_b": "I'm sorry to hear that.  I'm happy to help you with anything you need.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 195,
+      "prompt": "Human: How can I be a better singer?",
+      "response_a": "I’m not sure what you mean by “better singer”.  Do you mean “better at singing”?  Or “better at singing in a group”?  Or “better at singing in a group with other people”?  Or “better at singing in a g",
+      "response_b": "I’m not sure what you mean by “better singer”.  Do you mean you want to sing better?  Or do you mean you want to be a better singer?  Or do you mean you want to be a better singer in a particular genr",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 196,
+      "prompt": "Human: What are the benefits of consuming bananas?\n\nAssistant: Benefits of bananas are highlighted below:\n- Easy to chew and digest\n- Increases vitamin B6 and folate levels\n- Assists in boosting the i",
+      "response_a": "I’m glad you like it.  I’m happy to help you with anything else you need.  Please let me know if you have any questions.  I’m here for you.  Have a great day!  Goodbye.  Have a nice day.  Goodbye.  Ha",
+      "response_b": "I’m glad you like it. I’m happy to help you with your health and nutrition goals.",
+      "swapped": true,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 197,
+      "prompt": "Human: Should I wear a mask inside even if I am vaccinated?\n\nAssistant: I’m not the best person to answer that question, because I haven’t been vaccinated and I don’t have any expertise with infectiou",
+      "response_a": "I’m not sure I understand.  Are you saying that masks are less helpful outdoors because the virus is more easily dispersed?  Or that masks are less helpful outdoors because the virus is less likely to",
+      "response_b": "I think you’re right that masks are less helpful outdoors, since the virus is more likely to be in the air, and the mask might not be very good at keeping it out.  But I think it’s still a good idea t",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 198,
+      "prompt": "Human: How do I care for a parrot?",
+      "response_a": "I’m sorry, I’m not sure what you mean by “care for a parrot”.  Can you tell me more about what you mean?  Do you want to know how to feed a parrot, or how to train a parrot, or how to keep a parrot sa",
+      "response_b": "I’m not sure what you mean by “care for a parrot”.  Do you mean “how do I take care of a parrot”?  Or “how do I take care of a parrot’s needs”?  Or “how do I take care of a parrot’s health”?  Or “how ",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    },
+    {
+      "index": 199,
+      "prompt": "Human: The Doobie Brothers seem to have been around for decades. I'm curious about a few of their first hits, on the music charts?\n\nAssistant: Sure.  Let's do it.   I found the Billboard charts for 19",
+      "response_a": "I'm sorry, I'm not sure what you mean.  I'm just trying to help you.  I'm not sure if I'm doing a good job, but I'm happy to help you.  I'm sorry if I'm not being clear.  I'm sorry I'm not being clear",
+      "response_b": "I'm sorry, I'm not sure what you mean.  I was just trying to help you out.  I'm not sure what you're asking me to do.",
+      "swapped": false,
+      "raw_verdict": "Tie",
+      "winner": "tie"
+    }
+  ]
+}

@@ -60,7 +60,7 @@ async def judge_pair(
                         {"role": "system", "content": JUDGE_SYSTEM},
                         {"role": "user", "content": content},
                     ],
-                    max_tokens=10,
+                    max_completion_tokens=10,
                     temperature=0.0,
                 )
                 verdict = resp.choices[0].message.content.strip()

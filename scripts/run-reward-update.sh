@@ -32,11 +32,11 @@ cat > $ARGS_JSON <<EOF
   "reward_demo_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl",
   "reward_demo_prompt_key": "text",
   "reward_demo_answer_key": "label",
-  "reward_update_epochs": 1,
+  "reward_update_epochs": 2,
   "reward_update_batch_size": 8,
   "reward_update_lr": 5e-6,
-  "c_coef_init": 2.0,
-  "c_coef_min": 1.0,
+  "c_coef_init": 0.1,
+  "c_coef_min": 0.01,
   "c_coef_max": 10.0,
   "coef_scale_up": 1.2,
   "coef_scale_down": 0.8,
@@ -44,7 +44,7 @@ cat > $ARGS_JSON <<EOF
   "apply_chat_template": true,
   "apply_chat_template_kwargs": {},
   "save_debug_rollout_data": "$SLIME/rollout/rollout_{rollout_id}.pt",
-  "reward_update_rollout_window": 50,
+  "reward_update_rollout_window": 100,
   "reward_eval_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-test.jsonl",
   "reward_eval_prompt_key": "text",
   "reward_eval_chosen_key": "chosen",
@@ -57,7 +57,7 @@ EOF
 echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END) ==="
 
 # 4 GPUs via accelerate
-accelerate launch \
+ROUND_ID=${ROUND_ID:-0} accelerate launch \
   --num_processes 4 \
   --mixed_precision bf16 \
   -m slime.local_rm.update_reward_accel \

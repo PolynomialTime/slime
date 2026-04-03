@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,12 @@ import torch
 import torch.optim as optim
 from accelerate import Accelerator
 from tqdm import tqdm
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    _HAS_TB = True
+except ImportError:
+    SummaryWriter = None
+    _HAS_TB = False
 
 from .data import iter_batches, load_demo_samples, load_rollout_samples
 from .model import RunningMeanStd, get_sequence_rewards, init_reward_model, load_tokenizer, tokenize_prompt_answer
@@ -98,6 +105,12 @@ def parse_args():
     return parser.parse_args()
 
 
+def _reward_tb_dir(reward_dir: Path, rollout_id: int) -> Path:
+    slime_root = reward_dir.parents[1] if len(reward_dir.parents) >= 2 else reward_dir.parent
+    round_id = os.environ.get('ROUND_ID', str(rollout_id))
+    return slime_root / 'tensorboard_log' / 'slime-reward' / f'round{round_id}'
+
+
 def main():
     cli = parse_args()
     with open(cli.args_json, encoding="utf-8") as f:
@@ -113,8 +126,11 @@ def main():
     model_path = reward_dir / "latest"
 
     tokenizer = load_tokenizer(base_model)
-    # Always start reward model from base weights each update
-    model = init_reward_model(base_model, None)
+    # Warm-start reward model from previous checkpoint when available
+    if model_path.exists():
+        model = init_reward_model(base_model, str(model_path))
+    else:
+        model = init_reward_model(base_model, None)
     model.config.c_coef = float(getattr(args, "c_coef_init", 1.0))
     model.train()
 
@@ -155,6 +171,13 @@ def main():
     if not demo_samples or not rollout_samples:
         return
 
+    tb_writer = None
+    if accelerator.is_main_process and _HAS_TB:
+        tb_dir = _reward_tb_dir(reward_dir, cli.rollout_id)
+        tb_dir.mkdir(parents=True, exist_ok=True)
+        tb_writer = SummaryWriter(str(tb_dir))
+        accelerator.print(f'[reward_tb] Logging to {tb_dir}')
+
     if accelerator.is_main_process:
         accelerator.print(f"Loaded {len(demo_samples)} demo samples, {len(rollout_samples)} rollout samples")
 
@@ -181,9 +204,14 @@ def main():
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
 
-    num_demo_batches = (len(demo_samples) + args.reward_update_batch_size - 1) // args.reward_update_batch_size
-    num_roll_batches = (len(rollout_samples) + args.reward_update_batch_size - 1) // args.reward_update_batch_size
-    num_training_batches = min(num_demo_batches, num_roll_batches)
+    num_demo_batches = len(demo_samples) // args.reward_update_batch_size
+    num_roll_batches = len(rollout_samples) // args.reward_update_batch_size
+    num_training_batches_local = min(num_demo_batches, num_roll_batches)
+    # Sync min batch count across all ranks to prevent NCCL timeout
+    import torch as _torch
+    _local = _torch.tensor(num_training_batches_local, device=accelerator.device)
+    _global_min = accelerator.reduce(_local, reduction="min")
+    num_training_batches = int(_global_min.item())
 
     if accelerator.is_main_process:
         accelerator.print(f"Batch size: {args.reward_update_batch_size}")
@@ -209,8 +237,8 @@ def main():
     ):
         for demo_batch, roll_batch in tqdm(
             zip(
-                iter_batches(demo_samples, args.reward_update_batch_size),
-                iter_batches(rollout_samples, args.reward_update_batch_size),
+                iter_batches(demo_samples, args.reward_update_batch_size, drop_last=True),
+                iter_batches(rollout_samples, args.reward_update_batch_size, drop_last=True),
             ),
             desc="reward_update_batch",
             leave=False,
@@ -264,11 +292,21 @@ def main():
 
             global_batch_idx += 1
 
+            if tb_writer is not None:
+                tb_writer.add_scalar('reward/loss', loss.item(), global_batch_idx)
+                tb_writer.add_scalar('reward/irl_margin', l_old.item(), global_batch_idx)
+                tb_writer.add_scalar('reward/r_demo', rewards_demo.mean().item(), global_batch_idx)
+                tb_writer.add_scalar('reward/r_roll', rewards_roll.mean().item(), global_batch_idx)
+                tb_writer.add_scalar('reward/epsilon', epsilon_global, global_batch_idx)
+                tb_writer.add_scalar('reward/c_coef', c_coef, global_batch_idx)
+
             # Inline eval every eval_interval batches
             if accelerator.is_main_process and eval_chosen and global_batch_idx % eval_interval == 0:
                 unwrapped = accelerator.unwrap_model(model)
                 acc = _run_inline_eval(unwrapped, eval_chosen, eval_rejected, pad_id, accelerator.device)
                 eval_results.append({"batch": global_batch_idx, "accuracy": acc})
+                if tb_writer is not None:
+                    tb_writer.add_scalar('reward/accuracy', acc, global_batch_idx)
                 accelerator.print(
                     f"[reward_eval] batch={global_batch_idx}"
                     f"  acc={acc:.4f}"
@@ -299,6 +337,10 @@ def main():
 
     if accelerator.is_main_process:
         accelerator.print(f"Reward update completed for rollout {cli.rollout_id}")
+
+    if accelerator.is_main_process and tb_writer is not None:
+        tb_writer.flush()
+        tb_writer.close()
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)

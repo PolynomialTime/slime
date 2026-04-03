@@ -15,6 +15,11 @@ _WORKER = None
 _LOCK = threading.Lock()
 _SERVER_PROC = None
 _MODEL_MTIME = 0.0
+_MAX_RESPONSE_LEN = 512
+_SHORT_RESPONSE_THRESHOLD = 50
+_TRUNCATION_THRESHOLD = int(0.9 * _MAX_RESPONSE_LEN)
+_SHORT_PENALTY = 3.0
+_TRUNCATION_PENALTY = 10.0
 
 
 class _Request:
@@ -121,6 +126,15 @@ def _worker_loop(base_model, model_path):
 _ARGS_CACHE = [None, None]
 
 
+def _apply_bilateral_length_penalty(reward, sample):
+    response_len = getattr(sample, "response_length", 0)
+    if response_len < _SHORT_RESPONSE_THRESHOLD:
+        return reward - _SHORT_PENALTY
+    if response_len >= _TRUNCATION_THRESHOLD:
+        return reward - _TRUNCATION_PENALTY
+    return reward
+
+
 def _ensure_worker(args):
     global _WORKER
     reward_dir = getattr(args, "reward_model_dir", None) or "reward_model"
@@ -155,7 +169,7 @@ async def custom_rm(args, samples):
         def _wait_all():
             for r in reqs:
                 r.done.wait(timeout=120)
-            return [r.result for r in reqs]
+            return [_apply_bilateral_length_penalty(r.result, s) for r, s in zip(reqs, samples)]
         return await asyncio.to_thread(_wait_all)
 
     req = _Request(samples.tokens)
@@ -163,5 +177,5 @@ async def custom_rm(args, samples):
 
     def _wait():
         req.done.wait(timeout=120)
-        return req.result
+        return _apply_bilateral_length_penalty(req.result, samples)
     return await asyncio.to_thread(_wait)
