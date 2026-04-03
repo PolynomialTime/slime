@@ -38,6 +38,7 @@ if [ "$SKIP_SFT" -ne 1 ]; then
 fi
 rm -rf $SLIME/models/reward_model
 rm -rf $SLIME/models/save_dir*
+rm -rf $SLIME/models/policy_r*_hf
 rm -rf $SLIME/rollout
 rm -rf $SLIME/tensorboard_log
 if [ "$SKIP_SFT_BASELINE" -ne 1 ]; then
@@ -103,6 +104,7 @@ generate_with_sglang() {
     --prompt-data $SLIME/hh-rlhf-processed/hh-rlhf-merged-test.jsonl \
     --output $OUTPUT \
     --apply-chat-template \
+    --apply-chat-template-kwargs '{"enable_thinking":false}' \
     --max-new-tokens 512 \
     --concurrency 256
   kill $SGLANG_PID 2>/dev/null || true
@@ -122,13 +124,22 @@ GPT4O_REF=$SLIME/reference/outputs_gpt4o_full.jsonl  # permanent, not deleted by
 
 
 # ============ Rounds 1-7 ============
+CURRENT_HF_CKPT=$SFT_HF_DIR
 for ROUND in $(seq 1 $NUM_ROUNDS); do
+  ROUND_POLICY_HF=$SLIME/models/policy_r${ROUND}_hf
+  ROUND_OUTPUT=$SLIME/eval/outputs_policy_r${ROUND}.jsonl
+  if [ -f "$ROUND_POLICY_HF/config.json" ] && [ -f "$ROUND_OUTPUT" ] && [ "$(awk 'END {print NR}' "$ROUND_OUTPUT")" -ge 4000 ]; then
+    echo "Skipping Round $ROUND: found $ROUND_POLICY_HF/config.json and complete $ROUND_OUTPUT"
+    CURRENT_HF_CKPT=$ROUND_POLICY_HF
+    continue
+  fi
+
   echo "===== Round $ROUND/$NUM_ROUNDS: PPO ====="
 
   rm -rf /tmp/save_dir_tmp /tmp/critic_ckpt 2>/dev/null || true
 
   MODEL_SH=scripts/models/qwen3-1.7B.sh \
-  HF_CKPT=$SLIME/models/sft_checkpoint_hf \
+  HF_CKPT=$CURRENT_HF_CKPT \
   REF_CKPT=$SLIME/models/sft_checkpoint \
   SAVE_DIR=/tmp/save_dir_tmp \
   PROMPT_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
@@ -141,17 +152,22 @@ for ROUND in $(seq 1 $NUM_ROUNDS); do
   echo "===== Round $ROUND: Generating policy outputs ====="
   ITER=$(cat /tmp/save_dir_tmp/latest_checkpointed_iteration.txt)
   ITER_DIR=/tmp/save_dir_tmp/iter_$(printf "%07d" $ITER)
+  if [ -f "$ITER_DIR/common.pt" ]; then CKPT_DIR=$ITER_DIR
+  elif [ -f "$ITER_DIR/mp_rank_00/common.pt" ]; then CKPT_DIR=$ITER_DIR/mp_rank_00
+  else echo "ERROR: common.pt not found in $ITER_DIR"; exit 1; fi
 
+  rm -rf $ROUND_POLICY_HF
   python3 tools/convert_torch_dist_to_hf.py \
-    --input-dir $ITER_DIR \
-    --output-dir /tmp/policy_r${ROUND}_hf \
+    --input-dir $CKPT_DIR \
+    --output-dir $ROUND_POLICY_HF \
     --origin-hf-dir $SLIME/models/qwen3-1.7b-base \
     --force
 
   echo "=== Generating Round $ROUND policy outputs (SGLang) ==="
-  generate_with_sglang /tmp/policy_r${ROUND}_hf $SLIME/eval/outputs_policy_r${ROUND}.jsonl
+  generate_with_sglang $ROUND_POLICY_HF $ROUND_OUTPUT
 
-  rm -rf /tmp/policy_r${ROUND}_hf /tmp/save_dir_tmp
+  CURRENT_HF_CKPT=$ROUND_POLICY_HF
+  rm -rf /tmp/save_dir_tmp
 
   # ===== Analyze tensorboard metrics =====
   echo "===== Round $ROUND: Analyzing tensorboard ====="

@@ -42,7 +42,7 @@ cat > $ARGS_JSON <<EOF
   "coef_scale_down": 0.8,
   "target_reward_l2_norm": 3.0,
   "apply_chat_template": true,
-  "apply_chat_template_kwargs": {},
+  "apply_chat_template_kwargs": {"enable_thinking": false},
   "save_debug_rollout_data": "$SLIME/rollout/rollout_{rollout_id}.pt",
   "reward_update_rollout_window": 100,
   "reward_eval_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-test.jsonl",

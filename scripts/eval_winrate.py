@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import random
+import re
 
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm as async_tqdm
@@ -64,12 +65,20 @@ async def judge_pair(
                     temperature=0.0,
                 )
                 verdict = resp.choices[0].message.content.strip()
-                first = verdict.split()[0].upper() if verdict.split() else ""
-                if first in ("A", "B"):
-                    return first
-                if "TIE" in first or first == "SAME":
+                verdict_text = verdict.upper()
+                m = re.match(r'^\s*\**\s*([AB])\b', verdict_text)
+                if m:
+                    return m.group(1)
+                if re.search(r'\bTIE\b|\bSAME\b|\bNEITHER\b', verdict_text):
                     return "Tie"
-                logger.debug("unexpected verdict %r, treating as Tie", verdict)
+                m = re.search(r'\bRESPONSE\s+([AB])\b', verdict_text)
+                if m:
+                    return m.group(1)
+                if re.search(r'\bA\b', verdict_text) and not re.search(r'\bB\b', verdict_text):
+                    return "A"
+                if re.search(r'\bB\b', verdict_text) and not re.search(r'\bA\b', verdict_text):
+                    return "B"
+                logger.debug("unparseable verdict %r, treating as Tie", verdict)
                 return "Tie"
             except Exception as e:
                 if attempt == 2:

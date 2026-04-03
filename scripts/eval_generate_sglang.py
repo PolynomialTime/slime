@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=600)
 
 
-def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenizer=None) -> list[str]:
+def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenizer=None, chat_template_kwargs=None) -> list[str]:
     prompts = []
     raw = []
     with open(path, encoding="utf-8") as f:
@@ -25,12 +25,13 @@ def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenize
             raw.append(obj[prompt_key])
 
     if apply_chat_template and tokenizer:
+        ct_kwargs = chat_template_kwargs or {}
         for p in raw:
             if isinstance(p, str):
                 msgs = [{"role": "user", "content": p}]
             else:
                 msgs = p
-            prompts.append(tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True))
+            prompts.append(tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, **ct_kwargs))
     else:
         prompts = raw
     return raw, prompts
@@ -96,8 +97,12 @@ async def run(args):
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
 
+    chat_template_kwargs = None
+    if args.apply_chat_template_kwargs:
+        chat_template_kwargs = json.loads(args.apply_chat_template_kwargs)
+
     raw_prompts, formatted_prompts = load_prompts(
-        args.prompt_data, args.prompt_key, args.apply_chat_template, tokenizer
+        args.prompt_data, args.prompt_key, args.apply_chat_template, tokenizer, chat_template_kwargs
     )
 
     logger.info("Generating %d responses via SGLang at %s", len(formatted_prompts), args.sglang_url)
@@ -135,6 +140,8 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--apply-chat-template", action="store_true")
+    parser.add_argument("--apply-chat-template-kwargs", type=str, default=None,
+                        help='JSON string, e.g. \'{"enable_thinking":false}\'')
     parser.add_argument("--concurrency", type=int, default=256)
     args = parser.parse_args()
     asyncio.run(run(args))

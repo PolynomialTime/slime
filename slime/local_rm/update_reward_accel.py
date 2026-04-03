@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import random
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -192,6 +193,9 @@ def main():
     if accelerator.is_main_process:
         accelerator.print(f"After sharding (process {accelerator.process_index}/{accelerator.num_processes}): {len(demo_samples)} demo samples, {len(rollout_samples)} rollout samples")
 
+    random.shuffle(demo_samples)
+    random.shuffle(rollout_samples)
+
     def _cfg(m):
         return accelerator.unwrap_model(m).config
 
@@ -235,6 +239,9 @@ def main():
         leave=False,
         disable=not accelerator.is_main_process,
     ):
+        random.shuffle(demo_samples)
+        random.shuffle(rollout_samples)
+
         for demo_batch, roll_batch in tqdm(
             zip(
                 iter_batches(demo_samples, args.reward_update_batch_size, drop_last=True),
@@ -344,13 +351,14 @@ def main():
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)
-        step_dir = reward_dir / f"step_{cli.rollout_id}"
+        round_id = os.environ.get('ROUND_ID', str(cli.rollout_id))
+        step_dir = reward_dir / f"step_round{round_id}"
         step_dir.mkdir(parents=True, exist_ok=True)
         unwrapped.save_pretrained(step_dir, safe_serialization=False)
         _atomic_save(unwrapped, model_path)
 
         # Save eval results
-        eval_out = reward_dir / f"reward_eval_rollout_{cli.rollout_id}.json"
+        eval_out = reward_dir / f"reward_eval_round_{round_id}.json"
         final_acc = eval_results[-1]["accuracy"] if eval_results else -1
         eval_out.write_text(json.dumps({
             "rollout_id": cli.rollout_id,
