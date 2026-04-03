@@ -94,7 +94,7 @@ async def judge_pair(
             except Exception as e:
                 if attempt == 2:
                     logger.warning("judge failed after 3 attempts: %s", e)
-                    return "Tie", "", False
+                    return "Tie", "", True
                 await asyncio.sleep(2 ** attempt)
     return "Tie", "", False
 

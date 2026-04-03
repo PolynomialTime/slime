@@ -165,10 +165,13 @@ for ROUND in $(seq 1 $NUM_ROUNDS); do
   ROUND_POLICY_HF=$SLIME/models/policy_r${ROUND}_hf
   ROUND_OUTPUT=$SLIME/eval/outputs_policy_r${ROUND}.jsonl
   ROUND_SAVE_DIR=$SLIME/models/save_dir_r${ROUND}
-  if [ -f "$ROUND_POLICY_HF/config.json" ] && [ -f "$ROUND_OUTPUT" ] && [ "$(awk 'END {print NR}' "$ROUND_OUTPUT")" -ge 4000 ]; then
-    echo "Skipping Round $ROUND: found $ROUND_POLICY_HF/config.json and complete $ROUND_OUTPUT"
+  ROUND_REWARD_EVAL=$SLIME/models/reward_model/reward_eval_round_${ROUND}.json
+  if [ -f "$ROUND_POLICY_HF/config.json" ] && [ -f "$ROUND_OUTPUT" ] && [ "$(awk 'END {print NR}' "$ROUND_OUTPUT")" -ge 4000 ] && [ -f "$ROUND_REWARD_EVAL" ]; then
+    echo "Skipping Round $ROUND: found policy, eval output, and reward eval"
     CURRENT_HF_CKPT=$ROUND_POLICY_HF
-    PREV_SAVE_DIR=$ROUND_SAVE_DIR
+    if [ -d "$ROUND_SAVE_DIR" ]; then
+      PREV_SAVE_DIR=$ROUND_SAVE_DIR
+    fi
     continue
   fi
 

@@ -44,7 +44,7 @@ cat > $ARGS_JSON <<EOF
   "apply_chat_template": true,
   "apply_chat_template_kwargs": {"enable_thinking": false},
   "save_debug_rollout_data": "$SLIME/rollout/rollout_{rollout_id}.pt",
-  "reward_update_rollout_window": 100,
+  "reward_update_rollout_window": 150,
   "reward_eval_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-test.jsonl",
   "reward_eval_prompt_key": "text",
   "reward_eval_chosen_key": "chosen",
