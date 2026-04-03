@@ -50,6 +50,29 @@
 - 把 reward 主目标改成 pairwise preference / DPO 风格训练
 - 用另一套完全不同的 reward learning 替换当前 bi-level IRL 主干
 
+### 1.2 当前 HEAD 复查结论
+
+按当前仓库代码复查，以下几项已经有明确改动：
+
+1. `scripts/run-full-pipeline-job.sh` 已经引入 `CURRENT_HF_CKPT`，并按 round 保存 `policy_r{N}_hf`
+2. `scripts/run-reward-update.sh` 已经把 `apply_chat_template_kwargs` 对齐到 `{"enable_thinking": false}`
+3. `scripts/eval_generate_sglang.py` 已经支持透传 `apply_chat_template_kwargs`
+4. `slime/local_rm/update_reward_accel.py` 已经加入 `random.shuffle(...)`，并把 reward 产物改成按 round 命名
+
+但当前最关键的几个问题仍然没有真正解决：
+
+1. policy 连续训练表面上修了，实际上还没修透。`run-full-pipeline-job.sh` 虽然逐轮更新了 `HF_CKPT`，但 `run-irl-prod.sh` 仍然没有传 `--load`；而在这个项目里，当 `--load` 缺失时，训练会从 `--ref-load` 初始化，见 `slime/utils/arguments.py:683`。你现在仍把 `REF_CKPT` 固定在 SFT，所以 actor 还是每轮从 SFT 起步。
+2. `eval_winrate.py` 不再是“只看首词”，但新的 fallback 仍会系统性误判。普通英文里的冠词 `a` 会被误判成选择 A，而 `"Between A and B, A is better."` 这类明确判决又会被吞成 `Tie`。
+3. 多轮对话 schema 在仓库代码里仍没有真正切到 `messages`。本地仓库也没有 `hh-rlhf-processed/` 产物，无法验证你线上数据是否已经另行转换；从代码本身看，默认链路仍是字符串 `text -> 单条 user message`。
+4. round 1 前仍没有 reward bootstrap。`custom_rm` 在 `reward_model/latest` 不存在时仍返回 `0.0`，而 full pipeline 还是先 PPO、后 reward update。
+5. generic IRL 链路还停留在旧语义：`scripts/run-irl.sh` 仍默认 `direct` launcher，而 `slime/local_rm/update_reward.py` 依旧每轮从 base model 重置 RM。
+
+当前 `eval/` 里的输出也没有表现出“逐轮变好”。现有静态指标只说明：
+
+- `r1` 比之前那版健康一些，`I'm not sure` 从 `4.2%` 降到 `2.2%`，`Human:` continuation 降到 `0`
+- 但 `r2` 开始又明显变差，`r3/r5` 仍有显著 `Human:` continuation 和重复句
+- 所以“逐轮提升”这个目标到当前 HEAD 还没有形成
+
 ---
 
 ## 2. 本次审查范围
@@ -190,8 +213,8 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 | 文件 | 与 SFT 完全相同 |
 |---|---:|
-| `r1` | `14.47%` |
-| `r2` | `0.39%` |
+| `r1` | `2.13%` |
+| `r2` | `0.32%` |
 | `r3` | `0.30%` |
 | `r4` | `0.37%` |
 | `r5` | `0.15%` |
@@ -205,92 +228,86 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 ### 4.3 典型退化模式已经非常明显
 
-静态统计如下：
+按当前 `eval/` 中已有产物做简单静态统计如下：
 
-| 文件 | `I'm not sure` | 重复句 | `<50` 词短回复 |
-|---|---:|---:|---:|
-| SFT baseline | `4.2%` | `9.7%` | `72.5%` |
-| `r1` | `4.1%` | `15.1%` | `65.0%` |
-| `r2` | `9.0%` | `20.0%` | `39.7%` |
-| `r3` | `10.8%` | `25.0%` | `39.8%` |
-| `r4` | `9.1%` | `15.0%` | `45.2%` |
-| `r5` | `8.0%` | `22.7%` | `33.1%` |
-| `r6` | `11.0%` | `20.0%` | `30.8%` |
-| `r7` | `10.4%` | `15.4%` | `45.1%` |
+| 文件 | `I'm not sure` | `Human:` continuation | 重复句 | `<50` 词短回复 |
+|---|---:|---:|---:|---:|
+| SFT baseline | `4.2%` | `0.1%` | `12.7%` | `72.5%` |
+| `r1` | `2.2%` | `0.0%` | `10.1%` | `82.9%` |
+| `r2` | `7.4%` | `0.0%` | `14.4%` | `33.6%` |
+| `r3` | `10.8%` | `4.9%` | `21.4%` | `39.8%` |
+| `r4` | `9.1%` | `0.1%` | `8.5%` | `45.2%` |
+| `r5` | `8.0%` | `4.2%` | `17.7%` | `33.1%` |
+| `r6` | `11.0%` | `0.0%` | `14.3%` | `30.8%` |
+| `r7` | `10.4%` | `0.0%` | `10.6%` | `45.1%` |
 
 可以直接在输出里看到这些模式：
 
 - 长段重复废话：`eval/outputs_policy_r7.jsonl:1`
 - 语义回退到“我不懂你在说什么”：`eval/outputs_policy_r7.jsonl:4`
-- 生成 `Human:` continuation / 对话角色错乱：`eval/outputs_policy_r1.jsonl:4629`
+- 生成 `Human:` continuation / 对话角色错乱：`eval/outputs_policy_r3.jsonl:4629`
 - SFT baseline 本身也很差，但 round 后更差：`eval/outputs_sft_baseline.jsonl:5`
 
 ---
 
 ## 5. 主要问题清单
 
-## P0-1. `winrate` judge 解析过于脆弱，导致几乎全 Tie
+## P0-1. `eval_winrate.py` 已改过一轮，但当前 parser 仍会系统性误判
 
 位置：
 
-- `scripts/eval_winrate.py:66`
-- `scripts/eval_winrate.py:72`
+- `scripts/eval_winrate.py:67`
+- `scripts/eval_winrate.py:77`
+- `scripts/eval_winrate.py:153`
 
 现状：
 
-- judge 返回文本后，只看第一个词
-- 第一词不是严格的 `A` / `B` / `Tie`，就直接按 `Tie` 处理
+- 现在已经支持 `A.`、`**A**`、`Response A` 这类格式
+- 但 fallback 里仍会在整句搜索 `\\bA\\b` / `\\bB\\b`
+- judge 原始输出在保存前就被压成了 `A/B/Tie`，`raw_verdict` 实际不是 raw
 
 为什么严重：
 
-- judge 模型经常返回 `A.`、`A - ...`、`**A**`、`Response A` 这类格式
-- 这会把大量本来有胜负的样本硬吞成 `Tie`
-- 现有 `200/200 ties` 几乎可以直接判定为评测脚本失真
+- 普通英文里的冠词 `a` 会被误判成选择 A
+- 例如 `"I cannot determine a clear winner."`、`"There is not a clear winner here."` 当前都会被解析成 `A`
+- `"Between A and B, A is better."`、`"Between A and B, B is better."` 这类明确判决又会被落成 `Tie`
+- 后续没有办法区分“真 Tie”和“解析失败后被当 Tie”
 
 建议：
 
-1. 把原始 judge 输出完整保存
-2. 解析规则改成正则匹配：
-   - `^A[\\W_]*$`
-   - `^B[\\W_]*$`
-   - `\\bA\\b`
-   - `\\bB\\b`
-   - `Tie|Same`
-3. 对解析失败样本单独计数，不要混入 `Tie`
-4. 先拿现有 `outputs_policy_r*` 全量重跑一遍，得到真实曲线
+1. 同时保存 `verdict_raw` 与 `verdict_parsed`
+2. 去掉 `\\bA\\b` / `\\bB\\b` 这种会误吃普通英文冠词的宽松 fallback
+3. 解析失败单独记成 `parse_error`
+4. 修完后再拿现有 `outputs_policy_r*` 全量重跑一遍
 
-## P0-2. 每个 round 都从 SFT 重新开跑，而不是累计上一轮 policy
+## P0-2. full pipeline 表面上传递了 `CURRENT_HF_CKPT`，但 actor 仍没有真正连续训练
 
 位置：
 
-- `scripts/run-full-pipeline-job.sh:130`
-- `scripts/run-full-pipeline-job.sh:145`
+- `scripts/run-full-pipeline-job.sh:127`
+- `scripts/run-full-pipeline-job.sh:141`
 - `scripts/run-irl-prod.sh:50`
+- `slime/utils/arguments.py:683`
 
 现状：
 
-- 每轮 PPO 都固定：
-  - `HF_CKPT=$SLIME/models/sft_checkpoint_hf`
-  - `REF_CKPT=$SLIME/models/sft_checkpoint`
-- 没有把上一轮 actor checkpoint 作为下一轮 `--load`
-- 每轮输出 `r1..r7` 更像“7 次独立实验”，不是“7 次连续优化”
+- `run-full-pipeline-job.sh` 现在会把 `CURRENT_HF_CKPT` 逐轮更新到 `policy_r{N}_hf`
+- 但 `run-irl-prod.sh` 依旧没有传 `--load`
+- 在这个项目里，`--load` 缺失时，会用 `--ref-load` 作为训练初始 checkpoint
+- 你当前仍把 `REF_CKPT` 固定为 SFT checkpoint
 
 为什么严重：
 
-- reward update 在 round 结束后才生效
-- 但下一轮 policy 没继承上一轮 policy，前一轮 policy 学到的行为会直接丢失
-- 这会严重削弱 reward learning 对 policy 的累计影响
-- 更关键的是，这直接破坏了 `icml.pdf` 里 surrogate 的 `pi_old` 语义；当前 `pi_old` 不是“上一轮 policy”，而是每轮重新从 SFT 开出来的独立 policy
+- 这意味着 actor 还是会从 SFT 起步，而不是从上一轮 policy 接着学
+- `CURRENT_HF_CKPT` 目前没有真正接管 actor state
+- 这直接破坏了 `icml.pdf` 里 surrogate 的 `pi_old` 语义
 
 建议：
 
 1. 下一轮 actor 必须 `--load` 上一轮 policy checkpoint
 2. `REF_CKPT` 可以继续固定为 SFT，用作 KL anchor
-3. 把 round 定义成：
-   - round 0: SFT
-   - round 1: SFT + RM1 -> policy1
-   - round 2: policy1 + RM2 -> policy2
-4. 重新定义 `r1..r7` 的含义，不要再让它们互相独立
+3. 当前 `HF_CKPT=$CURRENT_HF_CKPT` 可以保留，但不能替代 `--load`
+4. 修完后再谈“逐轮提升”，否则 `r1..r7` 仍不是真正的连续优化
 
 ## P0-3. 多轮对话被错误地当成单轮 user message 套 chat template
 
@@ -310,6 +327,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 - 训练和 reward/tokenize/eval 一旦开 `apply_chat_template`
 - 这段字符串会被统一包装成：
   - `[{"role": "user", "content": prompt}]`
+- 当前本地仓库没有 `hh-rlhf-processed/` 目录，无法验证你线上运行时是否已经把数据产物改成 `messages`
 
 为什么严重：
 
@@ -326,7 +344,8 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 1. IRL 主链路统一改为 `messages` 格式
 2. 用 `scripts/prepare_sft_data.py` 的解析方式，把 `text` 提前转成真正的消息列表
 3. 训练、reward update、reward eval、eval generation 必须统一同一份 conversation schema
-4. 如果必须继续兼容 `text`，就在 `slime/utils/data.py` 和 `slime/local_rm/model.py` 里显式解析 `Human:` / `Assistant:` 标记，而不是直接包成单轮 user
+4. 如果你线上数据已经切成 `messages`，需要把这一步的数据准备也落库；否则下次重跑仍会退回旧行为
+5. 如果必须继续兼容 `text`，就在 `slime/utils/data.py` 和 `slime/local_rm/model.py` 里显式解析 `Human:` / `Assistant:` 标记，而不是直接包成单轮 user
 
 ---
 
@@ -336,8 +355,8 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 位置：
 
-- `scripts/run-full-pipeline-job.sh:124`
-- `scripts/run-full-pipeline-job.sh:196`
+- `scripts/run-full-pipeline-job.sh:126`
+- `scripts/run-full-pipeline-job.sh:212`
 - `slime/local_rm/custom_rm.py:157`
 
 现状：
@@ -360,7 +379,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
    - reward init/update
    - PPO round 1
 
-## P1-2. reward update 的 `direct` 和 `accelerate` 路径语义不一致
+## P1-2. prod 路径已经统一到 warm-start `accelerate`，但 generic 路径仍保留 `direct` 旧语义
 
 位置：
 
@@ -370,8 +389,9 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 现状：
 
-- `direct` 路径每轮都从 base model 重新初始化 RM
-- `accelerate` 路径会 warm-start 上一版 RM
+- `scripts/run-full-pipeline-job.sh` + `scripts/run-reward-update.sh` 这条 prod 外链路现在固定走 `accelerate`
+- 但 `scripts/run-irl.sh` 仍默认 `REWARD_UPDATE_LAUNCHER=direct`
+- `slime/local_rm/update_reward.py` 依旧每轮从 base model 重新初始化 RM
 
 影响：
 
@@ -381,11 +401,11 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 建议：
 
-1. 统一只保留 `accelerate` warm-start 语义
-2. 或者两条路径都改成 warm-start
-3. 明确在文档中写清楚 reward update 的真实行为
+1. 如果 `run-irl.sh` 还要保留，就把默认 launcher 改成 `accelerate`
+2. 或者把 `direct` 路径同步改成 warm-start + shuffle
+3. 文档里明确区分 prod 路径已修、generic 路径未修
 
-## P1-3. reward update 的采样方式有系统性偏差
+## P1-3. reward 采样偏差在 `accelerate` 路径上已部分修复，但 `direct` 路径仍是旧实现
 
 位置：
 
@@ -396,10 +416,9 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 现状：
 
-- demo 样本按文件顺序加载
-- rollout 样本按文件顺序加载
-- batch 数不匹配时直接 `zip(...)` 截断短边
-- 没有全局 shuffle
+- `slime/local_rm/update_reward_accel.py` 现在已经在 epoch 前和每个 epoch 开始时对 demo / rollout 做 `random.shuffle(...)`
+- 但 `slime/local_rm/update_reward.py` 仍按原顺序读入，并直接 `zip(...)` 截断
+- 两条路径的训练分布仍不一致
 
 影响：
 
@@ -409,11 +428,9 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 建议：
 
-1. demo 与 rollout 在每轮 reward update 前都做独立 shuffle
-2. 不要简单 `zip` 截断，改成：
-   - 随机采样到同样批次数
-   - 或者按较短一侧做重采样平衡
-3. 把使用率打印出来，并持久化到日志
+1. 继续保留 `accelerate` 路径里的 shuffle
+2. 把同样的逻辑补到 `direct` 路径，或者直接废弃 `direct`
+3. `zip(...)` 截断仍然存在，后续最好改成重采样或显式平衡采样
 
 ## P1-4. reward 目标和长度惩罚会鼓励“拉长废话”
 
@@ -450,34 +467,34 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 3. 保持当前 `l_old - c * epsilon` 这条主目标，不要先切到另一套 preference learning
 4. 只用最后 token 打分太脆，`response span pooling` 可以作为 reward 头部改造候选，但这属于次级优化，不是第一优先级
 
-## P1-5. full pipeline 目前无法稳定观测“逐轮 reward 是否提升”
+## P1-5. reward 产物按 round 命名的问题已基本修复，但 round / rollout 语义仍然混杂
 
 位置：
 
-- `scripts/run-full-pipeline-job.sh:201`
+- `scripts/run-full-pipeline-job.sh:217`
 - `scripts/run-reward-update.sh:65`
-- `slime/local_rm/update_reward_accel.py:347`
-- `slime/local_rm/update_reward_accel.py:353`
+- `slime/local_rm/update_reward_accel.py:354`
+- `slime/local_rm/update_reward_accel.py:361`
 
 现状：
 
-- full pipeline 每轮都把 `ROLLOUT_END` 设成 `NUM_ROLLOUT_PER_ROUND - 1`
-- 当前配置下就是固定 `149`
-- reward update 存档名和 eval 文件名都绑定 `cli.rollout_id`
-- 结果是 `step_149/` 和 `reward_eval_rollout_149.json` 会被每轮覆盖
+- `update_reward_accel.py` 现在已经把产物改成 `step_round{ROUND_ID}` 和 `reward_eval_round_{ROUND_ID}.json`
+- 因此“每轮互相覆盖”这个问题在 prod 路径上已经基本修复
+- 但 `run-reward-update.sh` 仍把 `--rollout-id` 固定成 `149`
+- 最终 JSON 内部的 `rollout_id`、日志里的 `rollout=149` 仍会和 round 语义混在一起
 
 影响：
 
-- 你没法可靠回看“reward accuracy 是否逐轮提升”
-- 即使 reward 真在变好，产物也会把 round 间差异抹掉
+- 现在可以回看 round 级 reward 产物了
+- 但日志和 JSON 字段仍不够直观，排查时容易把“本轮 round id”和“本轮最后一个 rollout id”混淆
 
 建议：
 
-1. 奖励模型快照和 eval 结果按 `ROUND_ID` 命名，而不是按固定 `rollout_id`
-2. 或者把 full pipeline 的 rollout id 设计成跨 round 单调递增
-3. reward 曲线、policy 曲线、checkpoint 命名都要用同一 round 语义
+1. 文件名继续保留按 `ROUND_ID` 命名
+2. JSON 内容里额外写入 `round_id`
+3. 日志打印也尽量统一用 `round=...`，减少混淆
 
-## P1-6. reward update 的模板参数和 PPO/eval 不一致
+## P1-6. prod 路径的模板参数已对齐，但 generic HF eval / generic 训练路径仍未跟进
 
 位置：
 
@@ -486,17 +503,21 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 现状：
 
-- PPO 阶段有 `--apply-chat-template-kwargs '{"enable_thinking":false}'`
-- 外部 reward update 里 `apply_chat_template_kwargs` 是空字典
+- `scripts/run-reward-update.sh` 已经把 `apply_chat_template_kwargs` 对齐到 `{"enable_thinking": false}`
+- `scripts/eval_generate_sglang.py` 也已支持透传模板参数
+- 但 `scripts/eval_generate.py` 仍没有 `apply_chat_template_kwargs`
+- `scripts/run-irl.sh` 这条 generic 训练链路也没有把同样的 kwargs 明确传下去
 
 影响：
 
-- 同一条样本在 PPO 看到的 tokenization，和 reward update / reward eval 看到的 tokenization 不一定一致
+- prod 主链路里这项已经明显改善
+- 但 generic HF eval / generic 训练链路仍可能和 prod tokenization 不一致
 
 建议：
 
-1. 把 PPO 使用的 chat template kwargs 原样传给 reward update
-2. 训练、reward、eval 三条链路统一模板参数
+1. `eval_generate.py` 补齐 `--apply-chat-template-kwargs`
+2. `run-irl.sh` 也显式传同一份 kwargs
+3. 把“prod 已对齐、generic 未对齐”写进文档，避免误以为全项目都一致了
 
 ---
 
@@ -609,7 +630,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 动作：
 
 1. 统一使用 `accelerate` warm-start
-2. demo / rollout 全局 shuffle
+2. 把 `accelerate` 路径里已经加上的 shuffle 逻辑同步到 generic 路径，或直接废弃 `direct`
 3. 去掉硬编码短回复大惩罚
 4. 增加重复惩罚
 5. 保持 `l_old - c * epsilon` 主目标不变，只修 reward shaping 和估计偏差
@@ -649,7 +670,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 3. 把 HH-RLHF IRL 主链路从 `text` 切到 `messages`
 4. 统一 reward update 到 warm-start `accelerate`
 5. 先做一次 RM bootstrap，再去掉短回复硬惩罚并加入重复惩罚
-6. 把 reward 产物按 round 正确命名，保证能看到逐轮曲线
+6. 把 reward JSON / logs 里的字段也统一到 round 语义，和现在的 round 级文件名对齐
 
 这六步做完，再去看新的 `winrate` 曲线才有意义。
 
