@@ -231,6 +231,8 @@ def main():
     # Eval every N batches
     eval_interval = max(1, num_training_batches // 10)  # ~10 evals per epoch
     eval_results = []
+    best_acc = 0.0
+    best_state_dict = None
     global_batch_idx = 0
 
     for epoch in tqdm(
@@ -307,21 +309,27 @@ def main():
                 tb_writer.add_scalar('reward/epsilon', epsilon_global, global_batch_idx)
                 tb_writer.add_scalar('reward/c_coef', c_coef, global_batch_idx)
 
-            # Inline eval every eval_interval batches
-            if accelerator.is_main_process and eval_chosen and global_batch_idx % eval_interval == 0:
-                unwrapped = accelerator.unwrap_model(model)
-                acc = _run_inline_eval(unwrapped, eval_chosen, eval_rejected, pad_id, accelerator.device)
-                eval_results.append({"batch": global_batch_idx, "accuracy": acc})
-                if tb_writer is not None:
-                    tb_writer.add_scalar('reward/accuracy', acc, global_batch_idx)
-                accelerator.print(
-                    f"[reward_eval] batch={global_batch_idx}"
-                    f"  acc={acc:.4f}"
-                    f"  loss={loss.item():.4f}"
-                    f"  irl_margin={l_old.item():.4f}"
-                    f"  epsilon={epsilon_global:.4f}"
-                    f"  c_coef={c_coef:.4f}"
-                )
+            # Inline eval every eval_interval batches — all ranks must sync
+            if eval_chosen and global_batch_idx % eval_interval == 0:
+                accelerator.wait_for_everyone()
+                if accelerator.is_main_process:
+                    unwrapped = accelerator.unwrap_model(model)
+                    acc = _run_inline_eval(unwrapped, eval_chosen, eval_rejected, pad_id, accelerator.device)
+                    eval_results.append({"batch": global_batch_idx, "accuracy": acc})
+                    if tb_writer is not None:
+                        tb_writer.add_scalar('reward/accuracy', acc, global_batch_idx)
+                    if acc > best_acc:
+                        best_acc = acc
+                        best_state_dict = {k: v.clone() for k, v in unwrapped.state_dict().items()}
+                    accelerator.print(
+                        f"[reward_eval] batch={global_batch_idx}"
+                        f"  acc={acc:.4f}"
+                        f"  loss={loss.item():.4f}"
+                        f"  irl_margin={l_old.item():.4f}"
+                        f"  epsilon={epsilon_global:.4f}"
+                        f"  c_coef={c_coef:.4f}"
+                    )
+                accelerator.wait_for_everyone()
 
             elif accelerator.is_main_process and global_batch_idx % 100 == 0:
                 accelerator.print(
@@ -351,6 +359,9 @@ def main():
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)
+        if best_state_dict is not None:
+            unwrapped.load_state_dict(best_state_dict)
+            accelerator.print(f"[reward] Restored best checkpoint with acc={best_acc:.4f}")
         round_id = os.environ.get('ROUND_ID', str(cli.rollout_id))
         step_dir = reward_dir / f"step_round{round_id}"
         step_dir.mkdir(parents=True, exist_ok=True)

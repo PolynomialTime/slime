@@ -32,7 +32,7 @@ cat > $ARGS_JSON <<EOF
   "reward_demo_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl",
   "reward_demo_prompt_key": "text",
   "reward_demo_answer_key": "label",
-  "reward_update_epochs": 2,
+  "reward_update_epochs": 1,
   "reward_update_batch_size": 8,
   "reward_update_lr": 5e-6,
   "c_coef_init": 0.1,

@@ -49,8 +49,8 @@ async def judge_pair(
     response_a: str,
     response_b: str,
     semaphore: asyncio.Semaphore,
-) -> str:
-    """Returns 'A', 'B', or 'Tie'."""
+) -> tuple[str, str]:
+    """Returns (parsed_verdict, raw_verdict_text)."""
     content = JUDGE_PROMPT.format(prompt=prompt, response_a=response_a, response_b=response_b)
     async with semaphore:
         for attempt in range(3):
@@ -68,24 +68,20 @@ async def judge_pair(
                 verdict_text = verdict.upper()
                 m = re.match(r'^\s*\**\s*([AB])\b', verdict_text)
                 if m:
-                    return m.group(1)
+                    return m.group(1), verdict
                 if re.search(r'\bTIE\b|\bSAME\b|\bNEITHER\b', verdict_text):
-                    return "Tie"
+                    return "Tie", verdict
                 m = re.search(r'\bRESPONSE\s+([AB])\b', verdict_text)
                 if m:
-                    return m.group(1)
-                if re.search(r'\bA\b', verdict_text) and not re.search(r'\bB\b', verdict_text):
-                    return "A"
-                if re.search(r'\bB\b', verdict_text) and not re.search(r'\bA\b', verdict_text):
-                    return "B"
+                    return m.group(1), verdict
                 logger.debug("unparseable verdict %r, treating as Tie", verdict)
-                return "Tie"
+                return "Tie", verdict
             except Exception as e:
                 if attempt == 2:
                     logger.warning("judge failed after 3 attempts: %s", e)
-                    return "Tie"
+                    return "Tie", ""
                 await asyncio.sleep(2 ** attempt)
-    return "Tie"
+    return "Tie", ""
 
 
 def load_outputs(path: str) -> list[dict]:
@@ -130,19 +126,18 @@ async def run(args):
 
         swap = random.random() < 0.5
         if swap:
-            judge_a, judge_b = resp_b, resp_a   # A=model_b, B=model_a in judge
+            judge_a, judge_b = resp_b, resp_a
         else:
-            judge_a, judge_b = resp_a, resp_b   # A=model_a, B=model_b in judge
+            judge_a, judge_b = resp_a, resp_b
 
-        raw = await judge_pair(client, args.model, prompt, judge_a, judge_b, semaphore)
+        verdict, raw_verdict = await judge_pair(client, args.model, prompt, judge_a, judge_b, semaphore)
 
-        # decode back to which original model won
-        if raw == "Tie":
+        if verdict == "Tie":
             winner = "tie"
         elif swap:
-            winner = "b" if raw == "A" else "a"
+            winner = "b" if verdict == "A" else "a"
         else:
-            winner = "a" if raw == "A" else "b"
+            winner = "a" if verdict == "A" else "b"
 
         return {
             "index": i,
@@ -150,7 +145,8 @@ async def run(args):
             "response_a": resp_a[:200],
             "response_b": resp_b[:200],
             "swapped": swap,
-            "raw_verdict": raw,
+            "verdict": verdict,
+            "raw_verdict": raw_verdict,
             "winner": winner,
         }
 

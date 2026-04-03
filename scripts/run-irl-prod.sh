@@ -37,6 +37,7 @@ fi
 HF_CKPT=${HF_CKPT:-"/path/to/hf_ckpt"}
 REF_CKPT=${REF_CKPT:-"/path/to/ref_ckpt"}
 SAVE_DIR=${SAVE_DIR:-"/path/to/save_dir"}
+ACTOR_LOAD=${ACTOR_LOAD:-""}
 PROMPT_DATA=${PROMPT_DATA:-"/path/to/prompt.jsonl"}
 DEMO_DATA=${DEMO_DATA:-"/path/to/demo.jsonl"}
 SLIME_ROOT=${SLIME_ROOT:-$(dirname "$SCRIPT_DIR")}
@@ -52,10 +53,14 @@ CKPT_ARGS=(
    --ref-load ${REF_CKPT}
    --no-load-optim
    --no-load-rng
+   --finetune
    --save ${SAVE_DIR}
    --critic-save /tmp/critic_ckpt
-   --save-interval 999
+   --save-interval ${NUM_ROLLOUT}
 )
+if [ -n "$ACTOR_LOAD" ] && [ -d "$ACTOR_LOAD" ]; then
+  CKPT_ARGS+=(--load ${ACTOR_LOAD})
+fi
 
 ROLLOUT_ARGS=(
    --prompt-data ${PROMPT_DATA}

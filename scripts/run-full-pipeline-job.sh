@@ -37,7 +37,7 @@ if [ "$SKIP_SFT" -ne 1 ]; then
   rm -rf $SFT_HF_DIR
 fi
 rm -rf $SLIME/models/reward_model
-rm -rf $SLIME/models/save_dir*
+rm -rf $SLIME/models/save_dir_r*
 rm -rf $SLIME/models/policy_r*_hf
 rm -rf $SLIME/rollout
 rm -rf $SLIME/tensorboard_log
@@ -122,26 +122,32 @@ fi
 
 GPT4O_REF=$SLIME/reference/outputs_gpt4o_full.jsonl  # permanent, not deleted by cleanup
 
+# NOTE: Reward bootstrap removed — random ScalarModel weights give harmful reward signals.
+# Round 1 runs with reward=0.0 (no RM), which is neutral. Round 1 reward update creates the first proper RM.
 
 # ============ Rounds 1-7 ============
 CURRENT_HF_CKPT=$SFT_HF_DIR
+PREV_SAVE_DIR=""
 for ROUND in $(seq 1 $NUM_ROUNDS); do
   ROUND_POLICY_HF=$SLIME/models/policy_r${ROUND}_hf
   ROUND_OUTPUT=$SLIME/eval/outputs_policy_r${ROUND}.jsonl
+  ROUND_SAVE_DIR=$SLIME/models/save_dir_r${ROUND}
   if [ -f "$ROUND_POLICY_HF/config.json" ] && [ -f "$ROUND_OUTPUT" ] && [ "$(awk 'END {print NR}' "$ROUND_OUTPUT")" -ge 4000 ]; then
     echo "Skipping Round $ROUND: found $ROUND_POLICY_HF/config.json and complete $ROUND_OUTPUT"
     CURRENT_HF_CKPT=$ROUND_POLICY_HF
+    PREV_SAVE_DIR=$ROUND_SAVE_DIR
     continue
   fi
 
   echo "===== Round $ROUND/$NUM_ROUNDS: PPO ====="
 
-  rm -rf /tmp/save_dir_tmp /tmp/critic_ckpt 2>/dev/null || true
+  rm -rf $ROUND_SAVE_DIR /tmp/critic_ckpt 2>/dev/null || true
 
   MODEL_SH=scripts/models/qwen3-1.7B.sh \
   HF_CKPT=$CURRENT_HF_CKPT \
   REF_CKPT=$SLIME/models/sft_checkpoint \
-  SAVE_DIR=/tmp/save_dir_tmp \
+  SAVE_DIR=$ROUND_SAVE_DIR \
+  ACTOR_LOAD=$PREV_SAVE_DIR \
   PROMPT_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
   DEMO_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
   NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND \
@@ -150,8 +156,8 @@ for ROUND in $(seq 1 $NUM_ROUNDS); do
 
   # ===== Convert checkpoint to HF and generate outputs (for winrate) =====
   echo "===== Round $ROUND: Generating policy outputs ====="
-  ITER=$(cat /tmp/save_dir_tmp/latest_checkpointed_iteration.txt)
-  ITER_DIR=/tmp/save_dir_tmp/iter_$(printf "%07d" $ITER)
+  ITER=$(cat $ROUND_SAVE_DIR/latest_checkpointed_iteration.txt)
+  ITER_DIR=$ROUND_SAVE_DIR/iter_$(printf "%07d" $ITER)
   if [ -f "$ITER_DIR/common.pt" ]; then CKPT_DIR=$ITER_DIR
   elif [ -f "$ITER_DIR/mp_rank_00/common.pt" ]; then CKPT_DIR=$ITER_DIR/mp_rank_00
   else echo "ERROR: common.pt not found in $ITER_DIR"; exit 1; fi
@@ -166,8 +172,14 @@ for ROUND in $(seq 1 $NUM_ROUNDS); do
   echo "=== Generating Round $ROUND policy outputs (SGLang) ==="
   generate_with_sglang $ROUND_POLICY_HF $ROUND_OUTPUT
 
+  PREV_SAVE_DIR=$ROUND_SAVE_DIR
   CURRENT_HF_CKPT=$ROUND_POLICY_HF
-  rm -rf /tmp/save_dir_tmp
+
+  # Delete save_dir from 2 rounds ago to save disk space
+  OLD_ROUND=$((ROUND - 2))
+  if [ $OLD_ROUND -ge 1 ]; then
+    rm -rf $SLIME/models/save_dir_r${OLD_ROUND}
+  fi
 
   # ===== Analyze tensorboard metrics =====
   echo "===== Round $ROUND: Analyzing tensorboard ====="
