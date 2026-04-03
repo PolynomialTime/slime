@@ -2,12 +2,12 @@
 
 ## 1. 结论摘要
 
-当前仓库里和 `winrate` 相关的主要问题，不是单点 bug，而是四条链路存在关键断点：
+当前仓库里和 `winrate` 相关的主要问题，不是单点 bug，而是四条链路还存在剩余断点：
 
-1. `winrate` parser 还不可靠，现有 judge 结果依然不能直接信。
+1. `winrate` parser 已经明显好于上一版，也会保存 `raw_verdict` / `parse_error`，但仍有部分常见裁决句式解析不到，现有 judge 结果还需要重跑确认。
 2. full pipeline 的 actor 连续加载在当前 HEAD 已经补上，但仍需要一次实跑验证确认 round 间确实连续。
-3. `HH-RLHF` 数据在仓库代码里仍是 `text -> 单轮 user message`，多轮对话结构没有真正落到代码主链路。
-4. reward update 虽然在 prod 路径上修了一部分，但 round 1 无 RM、长度惩罚、generic 路径分叉这些问题还在。
+3. `HH-RLHF` 多轮对话在训练 / RM / SGLang eval 主链路上已经做了运行时解析，但数据产物仍是 `text`，generic HF eval 仍未对齐。
+4. reward update 在 prod 路径上已经修了一批问题，但 round 1 无 RM、generic 路径分叉、reward 性能记录不完全可信这些问题还在。
 
 如果以 `icml.pdf` 的 bi-level IRL 目标为准，真正优先要修的不是“换方法”，而是把实现重新拉回这三个条件：
 
@@ -18,7 +18,7 @@
 基于当前 `eval/outputs_*.jsonl` 的静态统计，policy 输出仍没有体现“逐轮变好”：
 
 - `I'm not sure` 出现率：SFT baseline `4.2%`，`r3` `10.8%`，`r6` `11.0%`
-- 重复句样本占比：SFT baseline `9.7%`，`r3` `25.0%`
+- 重复句样本占比：SFT baseline `12.7%`，`r3` `21.4%`
 - `eval/winrate_r1_vs_sft.json`、`eval/winrate_r1_vs_gpt4o.json` 等结果全部是 `200/200 ties`
 
 因此当前最重要的工作顺序仍然不是调 PPO 超参，而是：
@@ -62,10 +62,11 @@
 但当前最关键的几个问题里，已经有一项得到实质修复，其余问题仍然存在：
 
 1. actor 连续加载这项在当前 HEAD 已经补上了。`run-full-pipeline-job.sh` 现在传 `ACTOR_LOAD=$PREV_SAVE_DIR`，`run-irl-prod.sh` 也会在目录存在时追加 `--load ${ACTOR_LOAD}`。这解决了之前“每轮从 SFT 起步”的核心断点，但还需要一轮真实训练来确认行为与预期一致。
-2. `eval_winrate.py` 不再是“只看首词”，但 parser 现在偏保守，仍会把很多明确胜负吞成 `Tie`。例如 `"Between A and B, A is better."`、`"My answer: B"` 目前都解析不出来。
-3. 多轮对话 schema 在仓库代码里仍没有真正切到 `messages`。本地仓库也没有 `hh-rlhf-processed/` 产物，无法验证你线上数据是否已经另行转换；从代码本身看，默认链路仍是字符串 `text -> 单条 user message`。
+2. `eval_winrate.py` 不再是“只看首词”，但 parser 现在仍有剩余盲区。像 `"The better response is A."`、`"I prefer B."`、`"Answer: A"`、`"Verdict: B"` 这类句式当前仍会落成 `Tie`。
+3. `HH-RLHF text` 在 `slime/utils/data.py`、`slime/local_rm/model.py`、`scripts/eval_generate_sglang.py` 里已经会被即时解析成多轮 `messages`，所以 prod 主链路不再是“整段字符串硬包成单条 user”。但 `prepare_hh_rlhf.py` 仍产出 `text`，`scripts/eval_generate.py` 这条 generic HF eval 仍未跟进，schema 仍然分裂。
 4. round 1 前仍没有 reward bootstrap。`custom_rm` 在 `reward_model/latest` 不存在时仍返回 `0.0`，而 full pipeline 还是先 PPO、后 reward update。
 5. generic IRL 链路还停留在旧语义：`scripts/run-irl.sh` 仍默认 `direct` launcher，而 `slime/local_rm/update_reward.py` 依旧每轮从 base model 重置 RM。
+6. reward checkpoint 虽然会恢复 inline eval 的最佳权重，但 `reward_eval_round_{N}.json` 当前仍写入“最后一次 eval”的准确率，不一定等于最终保存下来的 best checkpoint 表现。
 
 当前 `eval/` 里的输出也没有表现出“逐轮变好”。现有静态指标只说明：
 
@@ -252,33 +253,34 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 ## 5. 主要问题清单
 
-## P0-1. `eval_winrate.py` 已改过一轮，但当前 parser 仍会系统性误判
+## P0-1. `eval_winrate.py` 已补上 `raw_verdict` / `parse_error`，但 parser 还存在剩余鲁棒性缺口
 
 位置：
 
 - `scripts/eval_winrate.py:67`
-- `scripts/eval_winrate.py:77`
-- `scripts/eval_winrate.py:153`
+- `scripts/eval_winrate.py:69`
+- `scripts/eval_winrate.py:84`
+- `scripts/eval_winrate.py:155`
+- `scripts/eval_winrate.py:156`
 
 现状：
 
-- 现在已经支持 `A.`、`**A**`、`Response A` 这类格式
-- 但 fallback 里仍会在整句搜索 `\\bA\\b` / `\\bB\\b`
-- judge 原始输出在保存前就被压成了 `A/B/Tie`，`raw_verdict` 实际不是 raw
+- 当前 parser 已经支持 `A.`、`**A**`、`Response A`、`My answer: B`、`I choose B`、`Between A and B, A is better.` 这类常见格式
+- `raw_verdict` 现在会保存原始 judge 输出，`parse_error` 也会单独统计
+- 之前“普通英文里的冠词 `a` 被误判成 A”这个问题已经消失
+- 但仍有一些合理句式会被吞成 `Tie`，例如 `"The better response is A."`、`"I prefer B."`、`"Answer: A"`、`"Verdict: B"`
 
-为什么严重：
+为什么重要：
 
-- 普通英文里的冠词 `a` 会被误判成选择 A
-- 例如 `"I cannot determine a clear winner."`、`"There is not a clear winner here."` 当前都会被解析成 `A`
-- `"Between A and B, A is better."`、`"Between A and B, B is better."` 这类明确判决又会被落成 `Tie`
-- 后续没有办法区分“真 Tie”和“解析失败后被当 Tie”
+- 这版 parser 已经不是灾难性的，但还不能直接当作完全可信
+- 只要 parse fallback 还会吞掉明确裁决，`winrate` 仍可能被系统性拉向 `Tie`
+- 现有 `eval/winrate_*.json` 很可能混有旧 parser 产物；在没有重跑之前，不能把这些数字当作当前 HEAD 的真实结论
 
 建议：
 
-1. 同时保存 `verdict_raw` 与 `verdict_parsed`
-2. 去掉 `\\bA\\b` / `\\bB\\b` 这种会误吃普通英文冠词的宽松 fallback
-3. 解析失败单独记成 `parse_error`
-4. 修完后再拿现有 `outputs_policy_r*` 全量重跑一遍
+1. 继续补齐常见裁决句式，优先覆盖 `THE BETTER RESPONSE IS X`、`I PREFER X`、`ANSWER:`、`VERDICT:`
+2. 保留当前 `raw_verdict` 与 `parse_error` 输出
+3. 修完后拿现有 `outputs_policy_r*` 全量重跑一遍，并直接检查 `parse_errors / total`
 
 ## P0-2. actor 连续加载在当前 HEAD 已补上，但需要一次实跑确认 round 间确实连续
 
@@ -309,7 +311,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 3. 下一次实跑时重点验证 round2 是否真正从 round1 actor 继续训练
 4. 这项验证一旦通过，就可以从主问题清单里移除
 
-## P0-3. 多轮对话被错误地当成单轮 user message 套 chat template
+## P0-3. HH-RLHF 多轮对话在 prod 主链路上已做兼容解析，但数据产物和 generic eval 仍未统一
 
 位置：
 
@@ -322,30 +324,27 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 现状：
 
-- `prepare_hh_rlhf.py` 输出 `text` 字符串：
-  - `"Human: ...\n\nAssistant: ...\n\nHuman: ..."`
-- 训练和 reward/tokenize/eval 一旦开 `apply_chat_template`
-- 这段字符串会被统一包装成：
-  - `[{"role": "user", "content": prompt}]`
-- 当前本地仓库没有 `hh-rlhf-processed/` 目录，无法验证你线上运行时是否已经把数据产物改成 `messages`
+- `prepare_hh_rlhf.py` 仍输出 `text` 字符串，而不是持久化的 `messages`
+- 但 `slime/utils/data.py`、`slime/local_rm/model.py`、`scripts/eval_generate_sglang.py` 现在已经会把 `Human: ... / Assistant: ...` 字符串即时解析成多轮消息
+- 因此 prod 训练 / reward tokenize / SGLang eval 这条主链路，不再是简单的 `[{"role":"user","content": prompt}]`
+- 剩余未对齐点在于：
+  - `scripts/eval_generate.py` 这条 generic HF eval 仍然把字符串直接包成单轮 user
+  - 仓库里的数据产物仍是 `text-at-rest, messages-at-runtime`
+  - 当前本地仓库没有 `hh-rlhf-processed/` 产物，无法验证你线上是否已经把数据物理迁移成 `messages`
 
-为什么严重：
+为什么重要：
 
-- 原本的多轮对话结构消失
-- 模型看到的是“一条很长的 user 文本”，里面混着 `Human:` / `Assistant:`
-- 这会直接诱发：
-  - 回声式回答
-  - 角色延续错误
-  - 无端追问
-  - 输出 `Human:` continuation
+- 主链路的角色错乱风险比之前小了很多，这是实质性修复
+- 但 schema 分裂仍会带来两类问题：
+  - generic eval / generic 训练链路和 prod 行为不一致
+  - debug 时同一份数据在“落盘格式”和“运行时格式”之间来回切换，复现问题会很痛苦
 
 建议：
 
-1. IRL 主链路统一改为 `messages` 格式
-2. 用 `scripts/prepare_sft_data.py` 的解析方式，把 `text` 提前转成真正的消息列表
-3. 训练、reward update、reward eval、eval generation 必须统一同一份 conversation schema
-4. 如果你线上数据已经切成 `messages`，需要把这一步的数据准备也落库；否则下次重跑仍会退回旧行为
-5. 如果必须继续兼容 `text`，就在 `slime/utils/data.py` 和 `slime/local_rm/model.py` 里显式解析 `Human:` / `Assistant:` 标记，而不是直接包成单轮 user
+1. 如果追求最稳妥，还是把 `prepare_hh_rlhf.py` 产物直接切成持久化 `messages`
+2. 如果短期不改数据格式，至少把 `scripts/eval_generate.py` 也补上同样的 HH 文本解析逻辑
+3. 文档里明确记录当前状态是 `text-at-rest, messages-at-runtime`
+4. 如果你线上数据已经切成 `messages`，把转换链路也落到仓库，避免下次重跑退回兼容路径
 
 ---
 
@@ -378,6 +377,24 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
    - SFT
    - reward init/update
    - PPO round 1
+
+实现建议：
+
+1. 把 `pi_0` 明确定义成 SFT policy
+2. 在进入 round loop 之前，先用 SFT policy 生成一批 bootstrap rollout，并保存成和 PPO 一样的 `rollout_*.pt`
+3. 用这批 `pi_0` rollout 配合 demo 先训练出第一个 reward，记作 `r_1`
+4. 再进入 PPO loop，用 `r_1` 从 `pi_0` 训练出 `pi_1`
+5. 后续 round 统一成：
+   - 用 `pi_{t-1}` 的 rollout 更新 `r_t`
+   - 用 `r_t` 从 `pi_{t-1}` 训练 `pi_t`
+
+落到当前仓库，最小改法应该是：
+
+1. 在 `scripts/run-full-pipeline-job.sh` 的 round loop 前插一个 bootstrap phase
+2. 这一步不要只生成 `outputs_sft_baseline.jsonl`，还要额外落一份 reward update 可直接读取的 `rollout_*.pt`
+3. 这份 bootstrap rollout 最稳妥的来源是复用现有 rollout engine / `--save-debug-rollout-data`，而不是单独发明一套 JSONL 格式
+4. 然后在进入 round 1 之前先调用一次 `scripts/run-reward-update.sh`
+5. `ROUND_ID` / 日志里最好显式标成 `bootstrap` 或 `round0_reward`，避免和正式 round 混淆
 
 ## P1-2. prod 路径已经统一到 warm-start `accelerate`，但 generic 路径仍保留 `direct` 旧语义
 
@@ -432,7 +449,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 2. 把同样的逻辑补到 `direct` 路径，或者直接废弃 `direct`
 3. `zip(...)` 截断仍然存在，后续最好改成重采样或显式平衡采样
 
-## P1-4. reward 目标和长度惩罚会鼓励“拉长废话”
+## P1-4. reward shaping 已经比上一版合理很多，但长度偏置和序列打分方式仍可能扭曲 winrate
 
 位置：
 
@@ -443,31 +460,27 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 现状：
 
-- `response_length < 50` 直接扣 `3.0`
-- `response_length >= 0.9 * 512` 才扣截断惩罚
-- reward model 只取最后一个 token 的 scalar
-- 更新目标是 `mean(reward_demo) - mean(reward_rollout)`，没有显式偏好对比
+- `custom_rm.py` 已经不再是上一版那种粗暴 shaping：
+  - 短回复惩罚从 `3.0` 降到了 `1.0`
+  - 新增了 `Human:` continuation、`Assistant:` 前缀、重复 4-gram 惩罚
+- 但 `response_length < 50` 仍然会被硬扣分
+- reward model 仍只取最后一个 token 的 scalar
+- 更新目标仍是 `mean(reward_demo) - mean(reward_rollout)`，这点本身符合你当前 IRL 主思路
 
 影响：
 
-- 模型会倾向：
-  - 先凑长度
-  - 用模板化语言拖时间
-  - 用重复句把回答抻长
-- 这与真实 `winrate` 目标并不一致
-- 但这里不需要改掉你的 bi-level IRL 主目标，只需要把 reward 参数化和 shaping 从“可刷分”修回“更接近响应质量”
+- 这版 reward 已经明显比之前更不容易被“纯长度”刷分
+- 但它仍然天然不利于简短但高质量的回答
+- 对“reward 性能逐轮提高”的观测也会有干扰，因为 reward 分数里还混着较强的人工 shaping 偏置
 
 建议：
 
-1. 去掉硬编码短回复扣分，至少先降权
-2. 增加针对坏模式的惩罚：
-   - 重复 n-gram / 重复句惩罚
-   - `Human:` continuation 惩罚
-   - 无意义追问惩罚
-3. 保持当前 `l_old - c * epsilon` 这条主目标，不要先切到另一套 preference learning
-4. 只用最后 token 打分太脆，`response span pooling` 可以作为 reward 头部改造候选，但这属于次级优化，不是第一优先级
+1. 保留现有的重复惩罚和角色混淆惩罚
+2. 继续弱化硬长度惩罚，或者把它改成只针对明显不完整回答的软约束
+3. 保持当前 `l_old - c * epsilon` 主目标，不要切走 IRL 主思路
+4. 如果后续还有明显 reward / winrate 脱节，再考虑 reward head 的更稳健聚合方式
 
-## P1-5. reward 产物按 round 命名的问题已基本修复，但 round / rollout 语义仍然混杂
+## P1-5. reward 产物按 round 命名已基本修复，但性能记录仍和最终保存模型不完全一致
 
 位置：
 
@@ -475,24 +488,27 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 - `scripts/run-reward-update.sh:65`
 - `slime/local_rm/update_reward_accel.py:354`
 - `slime/local_rm/update_reward_accel.py:361`
+- `slime/local_rm/update_reward_accel.py:374`
 
 现状：
 
 - `update_reward_accel.py` 现在已经把产物改成 `step_round{ROUND_ID}` 和 `reward_eval_round_{ROUND_ID}.json`
 - 因此“每轮互相覆盖”这个问题在 prod 路径上已经基本修复
-- 但 `run-reward-update.sh` 仍把 `--rollout-id` 固定成 `149`
-- 最终 JSON 内部的 `rollout_id`、日志里的 `rollout=149` 仍会和 round 语义混在一起
+- 但当前实现会先做 final eval，再恢复 inline eval 期间的 best checkpoint
+- `reward_eval_round_{ROUND_ID}.json` 里的顶层 `accuracy` 用的是“最后一次 eval”的结果，不一定等于最终保存下来的 best checkpoint 表现
+- 同时 JSON 里仍只写 `rollout_id`，没有显式 `round_id`
 
 影响：
 
 - 现在可以回看 round 级 reward 产物了
-- 但日志和 JSON 字段仍不够直观，排查时容易把“本轮 round id”和“本轮最后一个 rollout id”混淆
+- 但如果你要判断“reward 性能是否逐轮提高”，当前 JSON 可能会低估最终保存模型的真实表现
+- 日志和 JSON 字段也仍然容易把“本轮 round id”和“本轮最后一个 rollout id”混淆
 
 建议：
 
 1. 文件名继续保留按 `ROUND_ID` 命名
-2. JSON 内容里额外写入 `round_id`
-3. 日志打印也尽量统一用 `round=...`，减少混淆
+2. JSON 里同时写入 `round_id`、`final_acc`、`best_acc`
+3. 如果恢复了 best checkpoint，最好在恢复后再跑一次 final eval，保证落盘指标和最终模型一致
 
 ## P1-6. prod 路径的模板参数已对齐，但 generic HF eval / generic 训练路径仍未跟进
 
@@ -568,7 +584,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 ## 8. 提升 winrate 的执行顺序
 
-## 阶段 A：先把评测修准
+## 阶段 A：把评测修到可重跑、可解释
 
 目标：
 
@@ -576,8 +592,8 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 动作：
 
-1. 修 `scripts/eval_winrate.py` 的 verdict 解析
-2. 保存 raw judge 输出
+1. 继续补齐 `scripts/eval_winrate.py` 的 verdict 解析
+2. 保留并检查 `raw_verdict` / `parse_error`
 3. 对现有 `outputs_policy_r1..r7` 全量重评
 4. 把样本分成：
    - 真 Tie
@@ -589,7 +605,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 - 不再出现“policy 对 SFT、对 gpt-4o 全部 200/200 tie”这种结果
 
-## 阶段 B：修训练闭环
+## 阶段 B：验证并补齐训练闭环
 
 目标：
 
@@ -597,7 +613,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 动作：
 
-1. 下一轮 actor 从上一轮 policy checkpoint 加载
+1. 实跑确认下一轮 actor 确实从上一轮 policy checkpoint 继续
 2. round 1 之前先初始化 reward model
 3. 保持 `REF_CKPT` 固定为 SFT 作为 KL anchor
 
@@ -605,7 +621,7 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 - `r2` 应该是“在 `r1` 基础上继续优化”，而不是重新采样一个独立实验
 
-## 阶段 C：统一对话数据格式
+## 阶段 C：把对话 schema 真正统一
 
 目标：
 
@@ -613,9 +629,9 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 动作：
 
-1. 训练数据改为 `messages`
-2. reward demo / reward eval / winrate eval prompt 全部统一为 `messages`
-3. `eval_generate.py` / `eval_generate_sglang.py` 不再把字符串硬包成单轮 user
+1. 要么直接把训练数据改为持久化 `messages`
+2. 要么至少把 generic `eval_generate.py` 补到和 prod 主链路一致
+3. reward demo / reward eval / winrate eval prompt 使用同一套 conversation 语义
 
 判定完成标准：
 
@@ -631,9 +647,10 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 1. 统一使用 `accelerate` warm-start
 2. 把 `accelerate` 路径里已经加上的 shuffle 逻辑同步到 generic 路径，或直接废弃 `direct`
-3. 去掉硬编码短回复大惩罚
-4. 增加重复惩罚
-5. 保持 `l_old - c * epsilon` 主目标不变，只修 reward shaping 和估计偏差
+3. 继续弱化硬编码短回复惩罚
+4. 保留并监控重复惩罚 / 角色混淆惩罚
+5. 保证 reward 落盘指标和最终保存模型一致
+6. 保持 `l_old - c * epsilon` 主目标不变，只修 reward shaping 和估计偏差
 
 判定完成标准：
 
@@ -665,14 +682,23 @@ reward update 由 `scripts/run-reward-update.sh` 单独完成：
 
 如果只做最小必要改动，并且明确不改变 `icml.pdf` 的 IRL 主思路，我建议按下面顺序推进：
 
-1. 修 `scripts/eval_winrate.py`
-2. 把 round 改成累计 actor checkpoint
-3. 把 HH-RLHF IRL 主链路从 `text` 切到 `messages`
-4. 统一 reward update 到 warm-start `accelerate`
-5. 先做一次 RM bootstrap，再去掉短回复硬惩罚并加入重复惩罚
-6. 把 reward JSON / logs 里的字段也统一到 round 语义，和现在的 round 级文件名对齐
+1. 补齐 `scripts/eval_winrate.py` 剩余 parser 漏洞，并重跑现有 `winrate`
+2. 实跑验证累计 actor checkpoint 已经真的生效
+3. 先做一次 RM bootstrap：用 `pi_0 = SFT` 的 rollout 配 demo 训练出 `r_1`
+4. 把 generic eval / generic IRL 路径继续往 prod 语义靠齐
+5. 继续弱化硬长度惩罚，同时保留重复 / 角色混淆惩罚
+6. 把 reward JSON / logs 的指标改成和最终保存 checkpoint 一致，并补 `round_id`
 
 这六步做完，再去看新的 `winrate` 曲线才有意义。
+
+如果按“完整 round = 先 reward，再 PPO”来定义，推荐记账方式是：
+
+- bootstrap：`pi_0 -> r_1`
+- round 1：`(pi_0, r_1) -> pi_1`
+- round 2 前 reward：`pi_1 -> r_2`
+- round 2：`(pi_1, r_2) -> pi_2`
+
+这样 round 的语义会比现在清楚得多，也更贴近 `icml.pdf` 里的 `pi_old -> r_t -> pi_t`。
 
 ---
 
