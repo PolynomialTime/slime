@@ -84,6 +84,7 @@ ROLLOUT_ARGS=(
    --input-key text
    --label-key label
    --apply-chat-template
+   --apply-chat-template-kwargs '{"enable_thinking":false}'
    --rollout-shuffle
 
    --num-rollout 7
@@ -130,7 +131,7 @@ IRL_ARGS=(
    --win-rate-eval-max-tokens 512
 )
 
-IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-direct})
+IRL_ARGS+=(--reward-update-launcher ${REWARD_UPDATE_LAUNCHER:-accelerate})
 if [ -n "${REWARD_UPDATE_ACCELERATE_CONFIG}" ]; then
   IRL_ARGS+=(--reward-update-accelerate-config ${REWARD_UPDATE_ACCELERATE_CONFIG})
 fi

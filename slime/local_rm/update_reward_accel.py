@@ -360,21 +360,33 @@ def main():
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)
+        round_id = os.environ.get('ROUND_ID', str(cli.rollout_id))
+
+        # Restore best checkpoint
         if best_state_dict is not None:
             unwrapped.load_state_dict(best_state_dict)
             accelerator.print(f"[reward] Restored best checkpoint with acc={best_acc:.4f}")
-        round_id = os.environ.get('ROUND_ID', str(cli.rollout_id))
+
+        # Re-eval after restoration to confirm
+        restored_acc = -1.0
+        if eval_chosen:
+            restored_acc = _run_inline_eval(unwrapped, eval_chosen, eval_rejected, pad_id, accelerator.device)
+            accelerator.print(f"[reward_eval_restored] acc={restored_acc:.4f}")
+
+        # Save
         step_dir = reward_dir / f"step_round{round_id}"
         step_dir.mkdir(parents=True, exist_ok=True)
         unwrapped.save_pretrained(step_dir, safe_serialization=False)
         _atomic_save(unwrapped, model_path)
 
-        # Save eval results
         eval_out = reward_dir / f"reward_eval_round_{round_id}.json"
         final_acc = eval_results[-1]["accuracy"] if eval_results else -1
         eval_out.write_text(json.dumps({
+            "round_id": round_id,
             "rollout_id": cli.rollout_id,
-            "accuracy": final_acc,
+            "best_acc": best_acc,
+            "final_acc": final_acc,
+            "restored_acc": restored_acc,
             "eval_curve": eval_results,
         }, indent=2), encoding="utf-8")
 

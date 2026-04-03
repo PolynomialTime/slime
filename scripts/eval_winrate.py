@@ -80,6 +80,15 @@ async def judge_pair(
                 m = re.search(r'\b([AB])\s+IS\s+(?:BETTER|BEST|MORE\s+HELPFUL|PREFERRED)\b', verdict_text)
                 if m:
                     return m.group(1), verdict, False
+                m = re.search(r'\bBETTER\s+(?:RESPONSE|ANSWER)\s+IS\s+([AB])\b', verdict_text)
+                if m:
+                    return m.group(1), verdict, False
+                m = re.search(r'\bI\s+PREFER\s+([AB])\b', verdict_text)
+                if m:
+                    return m.group(1), verdict, False
+                m = re.search(r'\b(?:ANSWER|VERDICT)[:\s]+([AB])\b', verdict_text)
+                if m:
+                    return m.group(1), verdict, False
                 logger.debug("unparseable verdict %r, treating as Tie", verdict)
                 return "Tie", verdict, True
             except Exception as e:

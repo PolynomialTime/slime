@@ -122,8 +122,41 @@ fi
 
 GPT4O_REF=$SLIME/reference/outputs_gpt4o_full.jsonl  # permanent, not deleted by cleanup
 
-# NOTE: Reward bootstrap removed — random ScalarModel weights give harmful reward signals.
-# Round 1 runs with reward=0.0 (no RM), which is neutral. Round 1 reward update creates the first proper RM.
+# ============ RM Bootstrap Phase ============
+# Generate SFT rollouts and train initial RM so Round 1 PPO has real reward signal
+echo "===== RM Bootstrap Phase ====="
+if [ ! -f "$SLIME/models/reward_model/latest/config.json" ]; then
+  BOOTSTRAP_SAVE_DIR=$SLIME/models/save_dir_bootstrap
+  rm -rf $BOOTSTRAP_SAVE_DIR /tmp/critic_ckpt 2>/dev/null || true
+
+  MODEL_SH=scripts/models/qwen3-1.7B.sh \
+  HF_CKPT=$SFT_HF_DIR \
+  REF_CKPT=$SLIME/models/sft_checkpoint \
+  SAVE_DIR=$BOOTSTRAP_SAVE_DIR \
+  PROMPT_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
+  DEMO_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
+  NUM_ROLLOUT=50 \
+  TB_EXP_NAME=bootstrap \
+  bash scripts/run-irl-prod.sh
+
+  echo "===== Killing bootstrap processes ====="
+  pkill -9 sglang || true
+  ray stop --force || true
+  pkill -9 ray || true
+  pkill -9 python || true
+  sleep 5
+
+  SLIME=$SLIME \
+  HF_CKPT=$SFT_HF_DIR \
+  ROUND_ID=0 \
+  ROLLOUT_END=49 \
+  NUM_ROLLOUT_PER_ROUND=50 \
+  bash scripts/run-reward-update.sh
+
+  rm -rf $BOOTSTRAP_SAVE_DIR
+else
+  echo "Reward model already exists, skipping bootstrap"
+fi
 
 # ============ Rounds 1-7 ============
 CURRENT_HF_CKPT=$SFT_HF_DIR

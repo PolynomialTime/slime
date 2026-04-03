@@ -18,6 +18,8 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from slime.local_rm.data import parse_hh_rlhf_text
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,12 @@ def parse_args():
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--apply-chat-template", action="store_true")
+    parser.add_argument("--apply-chat-template-kwargs", type=str, default=None,
+                        help='JSON string, e.g. \'{"enable_thinking":false}\'')
     return parser.parse_args()
 
 
-def load_prompts(path: str, prompt_key: str) -> list[str]:
+def load_prompts(path: str, prompt_key: str) -> list:
     prompts = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -46,15 +50,27 @@ def load_prompts(path: str, prompt_key: str) -> list[str]:
     return prompts
 
 
-def build_input(tokenizer, prompt: str, apply_chat_template: bool) -> str:
+def build_input(tokenizer, prompt, apply_chat_template: bool, chat_template_kwargs: dict | None = None) -> str:
     if not apply_chat_template:
-        return prompt
-    messages = [{"role": "user", "content": prompt}]
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        return prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+    if isinstance(prompt, str):
+        if prompt.lstrip().startswith("Human: "):
+            messages = parse_hh_rlhf_text(prompt)
+        else:
+            messages = [{"role": "user", "content": prompt}]
+    else:
+        messages = prompt
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        **(chat_template_kwargs or {}),
+    )
 
 
 def main():
     args = parse_args()
+    chat_template_kwargs = json.loads(args.apply_chat_template_kwargs) if args.apply_chat_template_kwargs else None
 
     logger.info("Loading tokenizer and model from %s", args.model_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
@@ -73,7 +89,7 @@ def main():
     prompts = load_prompts(args.prompt_data, args.prompt_key)
     logger.info("Loaded %d prompts from %s", len(prompts), args.prompt_data)
 
-    inputs = [build_input(tokenizer, p, args.apply_chat_template) for p in prompts]
+    inputs = [build_input(tokenizer, p, args.apply_chat_template, chat_template_kwargs) for p in prompts]
 
     results = []
     for i in tqdm(range(0, len(inputs), args.batch_size), desc="generating"):
