@@ -1,15 +1,27 @@
 """Batch reward scoring subprocess. Called by custom_rm.py with proper CUDA_VISIBLE_DEVICES."""
 import argparse
 import json
+import os
 import sys
 
 import torch
 
-from .model import get_sequence_rewards, init_reward_model, load_tokenizer
+from .model import get_sequence_rewards_adaptive, init_reward_model, load_tokenizer
 
 _MODEL = None
 _TOKENIZER = None
 _MODEL_PATH = None
+
+
+def _parse_env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _load(base_model, model_path):
@@ -38,6 +50,8 @@ def main():
 
     device = next(_MODEL.parameters()).device
     pad_id = _TOKENIZER.pad_token_id
+    max_batch_size = _parse_env_int("SLIME_CUSTOM_RM_MAX_BATCH_SIZE", 16)
+    max_batch_tokens = _parse_env_int("SLIME_CUSTOM_RM_MAX_BATCH_TOKENS", 2048)
 
     rewards = []
     if not tokens_list or all(not t for t in tokens_list):
@@ -47,13 +61,14 @@ def main():
         empty_indices = {i for i, t in enumerate(tokens_list) if not t}
 
         with torch.no_grad():
-            # Process in sub-batches to avoid OOM
-            SUB_BATCH = 64
-            all_r = []
-            for start in range(0, len(valid_tokens), SUB_BATCH):
-                sub = valid_tokens[start:start + SUB_BATCH]
-                r = get_sequence_rewards(_MODEL, sub, pad_id, device)
-                all_r.extend(r.tolist())
+            all_r = get_sequence_rewards_adaptive(
+                _MODEL,
+                valid_tokens,
+                pad_id,
+                device,
+                max_batch_size=max_batch_size,
+                max_batch_tokens=max_batch_tokens,
+            ).tolist()
 
         ridx = 0
         for i in range(len(tokens_list)):

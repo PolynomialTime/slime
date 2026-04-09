@@ -18,10 +18,23 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from slime.local_rm.data import parse_hh_rlhf_text
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def parse_hh_rlhf_text(text: str) -> list[dict]:
+    """Parse hh-rlhf text field into conversation turns."""
+    messages = []
+    parts = text.strip().split("\n\n")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith("Human: "):
+            messages.append({"role": "user", "content": part[len("Human: "):]})
+        elif part.startswith("Assistant: "):
+            messages.append({"role": "assistant", "content": part[len("Assistant: "):]})
+    return messages
 
 
 def parse_args():

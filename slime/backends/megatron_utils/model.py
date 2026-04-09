@@ -18,7 +18,7 @@ from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer
 from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
-from megatron.core.utils import get_model_config
+from megatron.core.utils import get_model_config, unwrap_model
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
@@ -31,6 +31,27 @@ from .loss import loss_function
 from .model_provider import get_model_provider_func
 
 logger = logging.getLogger(__name__)
+
+
+def _reinitialize_critic_output_layers(model: Sequence[DDP]) -> None:
+    """Reset critic value heads after checkpoint load.
+
+    Critic and actor share the `output_layer` parameter name, but critic replaces
+    the LM head with a scalar value head. When loading a base Megatron checkpoint,
+    the shared name can cause the freshly initialized critic head to pick up
+    incompatible checkpoint values. Reinitializing immediately after load keeps
+    the backbone warm-start while restoring a clean value head.
+    """
+    with torch.no_grad():
+        for chunk in unwrap_model(model):
+            output_layer = getattr(chunk, "output_layer", None)
+            if output_layer is None:
+                continue
+            output_layer.weight.data.normal_(mean=0.0, std=0.02)
+            if output_layer.bias is not None:
+                output_layer.bias.data.zero_()
+
+    logger.info("[critic] Reinitialized output_layer after checkpoint load")
 
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
@@ -783,6 +804,8 @@ def initialize_model_and_optimizer(
         checkpointing_context={},
         skip_load_to_model_and_opt=False,
     )
+    if role == "critic":
+        _reinitialize_critic_output_layers(model)
     clear_memory()
 
     opt_param_scheduler.step(increment=iteration * args.global_batch_size)

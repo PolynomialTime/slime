@@ -80,6 +80,7 @@ def create_placement_groups(args):
     """Create placement groups for actor and rollout engines."""
 
     num_gpus = 0
+    critic_offset = None
     if args.debug_train_only:
         num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
         rollout_offset = 0
@@ -89,6 +90,9 @@ def create_placement_groups(args):
     elif args.debug_rollout_only:
         num_gpus = args.rollout_num_gpus
         rollout_offset = 0
+        if args.use_critic:
+            logger.warning("debug_rollout_only with use_critic enabled; critic PG will share rollout bundles")
+            critic_offset = rollout_offset
     elif args.colocate:
         num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
         rollout_offset = 0

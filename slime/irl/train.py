@@ -120,6 +120,11 @@ def train_irl(args):
         # Train policy with current reward model
         logger.info(f"Rollout {rollout_id}: Training policy")
         if args.use_critic:
+            if args.offload_train and rollout_id >= args.num_critic_only_steps:
+                # _actor_critic_groups is a custom NCCL PG created via init_process_group(),
+                # not tracked by reloadable_process_group. After sleep()/wake_up() cycle,
+                # the group is stale (critic GPUs were used by rollout). Rebuild it explicitly.
+                actor_model.connect(critic_model)
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
             if rollout_id >= args.num_critic_only_steps:
                 ray.get(actor_model.async_train(rollout_id, rollout_data_ref))

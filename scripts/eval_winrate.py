@@ -19,6 +19,7 @@ import logging
 import os
 import random
 import re
+from typing import Any
 
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm as async_tqdm
@@ -26,7 +27,37 @@ from tqdm.asyncio import tqdm as async_tqdm
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-JUDGE_SYSTEM = "You are an impartial judge evaluating AI assistant responses."
+
+def extract_verdict_text(resp: Any) -> str:
+    if hasattr(resp, "choices"):
+        return resp.choices[0].message.content.strip()
+    if isinstance(resp, str):
+        snippet = resp.strip()[:200]
+        if snippet.lower().startswith("<!doctype html") or snippet.lower().startswith("<html"):
+            raise RuntimeError(
+                "received HTML instead of OpenAI JSON response; check that base_url points to an OpenAI-compatible /v1 endpoint"
+            )
+        raise RuntimeError(f"unexpected string response from API: {snippet!r}")
+    raise RuntimeError(f"unexpected response type from API: {type(resp).__name__}")
+
+
+def is_content_filter_error(exc: Exception) -> bool:
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error", {})
+        if err.get("code") == "content_filter":
+            return True
+    code = getattr(exc, "code", None)
+    if code == "content_filter":
+        return True
+    message = str(exc).lower()
+    return "content_filter" in message or "content management policy" in message
+
+JUDGE_SYSTEM = (
+    "You are an impartial judge evaluating AI assistant responses. "
+    "You must output exactly one token: A, B, or Tie. "
+    "Do not include any explanation, reasoning, punctuation, or extra words."
+)
 
 JUDGE_PROMPT = """You are evaluating two AI assistant responses to the same conversation.
 
@@ -39,7 +70,14 @@ Response A:
 Response B:
 {response_b}
 
-Which response is more helpful and appropriate? Reply with exactly one of: "A", "B", or "Tie"."""
+Which response is more helpful and appropriate?
+
+Rules:
+- Return exactly one token: A, B, or Tie
+- Do not explain your answer
+- Do not output any other text
+
+Answer:"""
 
 
 async def judge_pair(
@@ -49,22 +87,29 @@ async def judge_pair(
     response_a: str,
     response_b: str,
     semaphore: asyncio.Semaphore,
+    fallback_client: AsyncOpenAI | None = None,
+    fallback_model: str | None = None,
 ) -> tuple[str, str, bool]:
     """Returns (parsed_verdict, raw_verdict_text, is_parse_error)."""
     content = JUDGE_PROMPT.format(prompt=prompt, response_a=response_a, response_b=response_b)
     async with semaphore:
-        for attempt in range(3):
+        active_client = client
+        active_model = model
+        using_fallback = False
+        attempt = 0
+        while True:
+            attempt += 1
             try:
-                resp = await client.chat.completions.create(
-                    model=model,
+                resp = await active_client.chat.completions.create(
+                    model=active_model,
                     messages=[
                         {"role": "system", "content": JUDGE_SYSTEM},
                         {"role": "user", "content": content},
                     ],
-                    max_completion_tokens=10,
+                    max_completion_tokens=4,
                     temperature=0.0,
                 )
-                verdict = resp.choices[0].message.content.strip()
+                verdict = extract_verdict_text(resp)
                 verdict_text = verdict.upper()
                 m = re.match(r'^\s*\**\s*([AB])\b', verdict_text)
                 if m:
@@ -89,14 +134,42 @@ async def judge_pair(
                 m = re.search(r'\b(?:ANSWER|VERDICT)[:\s]+([AB])\b', verdict_text)
                 if m:
                     return m.group(1), verdict, False
-                logger.debug("unparseable verdict %r, treating as Tie", verdict)
-                return "Tie", verdict, True
+                delay_s = min(30, max(1, attempt // 5))
+                logger.warning(
+                    "unparseable verdict on attempt %d, retrying in %ss: %r",
+                    attempt,
+                    delay_s,
+                    verdict,
+                )
+                await asyncio.sleep(delay_s)
             except Exception as e:
-                if attempt == 2:
-                    logger.warning("judge failed after 3 attempts: %s", e)
-                    return "Tie", "", True
-                await asyncio.sleep(2 ** attempt)
-    return "Tie", "", False
+                if is_content_filter_error(e):
+                    if fallback_client is not None and fallback_model and not using_fallback:
+                        logger.warning(
+                            "primary judge blocked by content filter; switching to fallback model=%s",
+                            fallback_model,
+                        )
+                        active_client = fallback_client
+                        active_model = fallback_model
+                        using_fallback = True
+                        attempt = 0
+                        await asyncio.sleep(1)
+                        continue
+                    if using_fallback:
+                        raise RuntimeError(
+                            f"judge request blocked by content filter on fallback model={active_model}"
+                        ) from e
+                    raise RuntimeError(
+                        "judge request blocked by content filter and no fallback judge is configured"
+                    ) from e
+                delay_s = min(30, 2 ** min(attempt - 1, 4))
+                logger.warning(
+                    "judge request failed on attempt %d, retrying in %ss: %s",
+                    attempt,
+                    delay_s,
+                    e,
+                )
+                await asyncio.sleep(delay_s)
 
 
 def load_outputs(path: str) -> list[dict]:
@@ -132,6 +205,23 @@ async def run(args):
 
     base_url = args.base_url or os.environ.get("OPENAI_BASE_URL") or None
     client = AsyncOpenAI(api_key=api_key, **({"base_url": base_url} if base_url else {}))
+    fallback_model = args.fallback_model or os.environ.get("WINRATE_FALLBACK_MODEL") or None
+    fallback_api_key = (
+        args.fallback_api_key
+        or os.environ.get("WINRATE_FALLBACK_API_KEY")
+        or (api_key if fallback_model else None)
+    )
+    fallback_base_url = (
+        args.fallback_base_url
+        or os.environ.get("WINRATE_FALLBACK_BASE_URL")
+        or (base_url if fallback_model else None)
+    )
+    fallback_client = None
+    if fallback_model:
+        fallback_client = AsyncOpenAI(
+            api_key=fallback_api_key,
+            **({"base_url": fallback_base_url} if fallback_base_url else {}),
+        )
     semaphore = asyncio.Semaphore(args.concurrency)
 
     async def eval_one(i):
@@ -145,7 +235,16 @@ async def run(args):
         else:
             judge_a, judge_b = resp_a, resp_b
 
-        verdict, raw_verdict, parse_error = await judge_pair(client, args.model, prompt, judge_a, judge_b, semaphore)
+        verdict, raw_verdict, parse_error = await judge_pair(
+            client,
+            args.model,
+            prompt,
+            judge_a,
+            judge_b,
+            semaphore,
+            fallback_client=fallback_client,
+            fallback_model=fallback_model,
+        )
 
         if verdict == "Tie":
             winner = "tie"
@@ -207,6 +306,9 @@ def main():
     parser.add_argument("--api-key", default=None, help="OpenAI/OpenRouter API key")
     parser.add_argument("--base-url", default=None, help="API base URL (e.g. https://openrouter.ai/api/v1)")
     parser.add_argument("--model", default="gpt-4o")
+    parser.add_argument("--fallback-api-key", default=None, help="Fallback judge API key")
+    parser.add_argument("--fallback-base-url", default=None, help="Fallback judge API base URL")
+    parser.add_argument("--fallback-model", default=None, help="Fallback judge model for filtered prompts")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=16, help="Max concurrent API calls")
     args = parser.parse_args()

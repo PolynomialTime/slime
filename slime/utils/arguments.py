@@ -729,6 +729,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=0,
                 help="number of iterations to linearly warmup for critic model.",
             )
+            parser.add_argument(
+                "--critic-clip-grad",
+                type=float,
+                default=None,
+                help="Gradient clipping threshold for critic optimization. Defaults to --clip-grad when unset.",
+            )
 
             parser.add_argument("--eps-clip", type=float, default=0.2, help="PPO clip range")
             parser.add_argument("--eps-clip-high", type=float, default=None, help="PPO clip upper range")
@@ -1594,6 +1600,8 @@ def slime_validate_args(args):
         args.critic_load = args.load
     if args.critic_lr is None:
         args.critic_lr = args.lr
+    if args.critic_clip_grad is None:
+        args.critic_clip_grad = args.clip_grad
 
     if args.offload:
         args.offload_train = True

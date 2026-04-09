@@ -1,10 +1,9 @@
 #!/bin/bash
 
-# Reward Update Phase — 4×GPU via accelerate
+# Reward Update Phase -- single-GPU via accelerate
 # Called by run-full-pipeline-job.sh after PPO phase
 # All GPUs are free (PPO processes killed before this runs)
 
-# kill any leftover processes
 pkill -9 sglang || true
 pkill -9 ray || true
 pkill -9 python || true
@@ -14,51 +13,73 @@ set -ex
 
 SLIME=${SLIME:-/mnt/shared-storage-gpfs2/wangqianyi2/slime}
 cd $SLIME
+ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 
 ROUND_ID=${ROUND_ID:-0}
 ROLLOUT_END=${ROLLOUT_END:-335}
 NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-336}
+REWARD_TRAIN_SYNTH_PATH=${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl}
+REWARD_EVAL_PATH=${REWARD_EVAL_PATH:-}
+REWARD_EVAL_TARGET_PATH=${REWARD_EVAL_TARGET_PATH:-}
+REWARD_EVAL_HOLDOUT_RATIO=${REWARD_EVAL_HOLDOUT_RATIO:-0.1}
+REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-200}
 
-# Build reward update args JSON
+if [ ! -f "$REWARD_TRAIN_SYNTH_PATH" ]; then
+  echo "ERROR: missing synthetic reward train data at $REWARD_TRAIN_SYNTH_PATH" >&2
+  exit 1
+fi
+
+if [ -n "$REWARD_EVAL_PATH" ] && [ ! -f "$REWARD_EVAL_PATH" ]; then
+  echo "ERROR: missing external reward eval data at $REWARD_EVAL_PATH" >&2
+  exit 1
+fi
+
+if [ -n "$REWARD_EVAL_TARGET_PATH" ] && [ ! -f "$REWARD_EVAL_TARGET_PATH" ]; then
+  echo "ERROR: missing external reward eval target data at $REWARD_EVAL_TARGET_PATH" >&2
+  exit 1
+fi
+
 REWARD_DIR=$SLIME/models/reward_model
 mkdir -p $REWARD_DIR
 
 ARGS_JSON=$REWARD_DIR/reward_update_args.json
 cat > $ARGS_JSON <<EOF
 {
-  "hf_checkpoint": "${HF_CKPT:-$SLIME/models/sft_checkpoint_hf}",
+  "hf_checkpoint": "${HF_CKPT:-$SLIME/models/sft_checkpoint_8b_hf}",
   "reward_model_dir": "$REWARD_DIR",
   "reward_model_init": null,
-  "reward_demo_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl",
+  "reward_demo_path": "$REWARD_TRAIN_SYNTH_PATH",
   "reward_demo_prompt_key": "text",
-  "reward_demo_answer_key": "label",
-  "reward_update_epochs": 1,
+  "reward_demo_answer_key": "chosen",
+  "reward_update_epochs": 2,
   "reward_update_batch_size": 8,
-  "reward_update_lr": 5e-6,
-  "c_coef_init": 0.1,
+  "reward_update_lr": 1e-6,
+  "c_coef_init": 0.5,
   "c_coef_min": 0.01,
   "c_coef_max": 10.0,
   "coef_scale_up": 1.2,
-  "coef_scale_down": 0.8,
-  "target_reward_l2_norm": 3.0,
+  "coef_scale_down": 0.95,
+  "target_reward_l2_norm": 1.5,
   "apply_chat_template": true,
   "apply_chat_template_kwargs": {"enable_thinking": false},
   "save_debug_rollout_data": "$SLIME/rollout/rollout_{rollout_id}.pt",
   "reward_update_rollout_window": 150,
-  "reward_eval_path": "$SLIME/hh-rlhf-processed/hh-rlhf-merged-test.jsonl",
+  "reward_eval_path": "$REWARD_EVAL_PATH",
   "reward_eval_prompt_key": "text",
   "reward_eval_chosen_key": "chosen",
-  "reward_eval_rejected_key": "rejected",
-  "reward_eval_max_samples": 200,
+  "reward_eval_target_path": "$REWARD_EVAL_TARGET_PATH",
+  "reward_eval_target_prompt_key": "prompt",
+  "reward_eval_target_answer_key": "response",
+  "reward_eval_holdout_ratio": $REWARD_EVAL_HOLDOUT_RATIO,
+  "reward_eval_max_samples": $REWARD_EVAL_MAX_SAMPLES,
   "reward_eval_batch_size": 32
 }
 EOF
 
 echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END) ==="
 
-# 4 GPUs via accelerate
 ROUND_ID=${ROUND_ID:-0} accelerate launch \
-  --num_processes 4 \
+  --num_processes 8 \
   --mixed_precision bf16 \
   -m slime.local_rm.update_reward_accel \
   --args-json $ARGS_JSON \

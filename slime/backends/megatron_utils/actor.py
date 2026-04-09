@@ -43,6 +43,20 @@ logger = logging.getLogger(__name__)
 
 
 class MegatronTrainRayActor(TrainRayActor):
+    def _destroy_actor_critic_group(self) -> None:
+        group = getattr(self, "_actor_critic_groups", None)
+        if group is None:
+            return
+        try:
+            dist.destroy_process_group(group)
+        except ValueError as e:
+            logger.warning(
+                "actor_critic process group already invalid/destroyed; skipping cleanup. Exception: %s",
+                e,
+                exc_info=True,
+            )
+        self._actor_critic_groups = None
+
     @with_defer(lambda: Timer().start("train_wait"))
     def init(
         self,
@@ -86,6 +100,8 @@ class MegatronTrainRayActor(TrainRayActor):
             self.args.save = self.args.critic_save
             self.args.lr = self.args.critic_lr
             self.args.lr_warmup_iters = self.args.critic_lr_warmup_iters
+            self.args.clip_grad = self.args.critic_clip_grad
+            logger.info("[critic] using lr=%s warmup_iters=%s clip_grad=%s", self.args.lr, self.args.lr_warmup_iters, self.args.clip_grad)
 
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role
@@ -159,6 +175,7 @@ class MegatronTrainRayActor(TrainRayActor):
         clear_memory(clear_host_memory=True)
         print_memory("before offload model")
         destroy_process_groups()
+        self._destroy_actor_critic_group()
 
         torch_memory_saver.pause()
 
@@ -587,6 +604,8 @@ class MegatronTrainRayActor(TrainRayActor):
         master_address: str | None = None,
         master_port: int | None = None,
     ) -> None:
+        self._destroy_actor_critic_group()
+
         if self.role == "actor":
             master_address = ray.util.get_node_ip_address()
             with socket.socket() as sock:

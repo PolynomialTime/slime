@@ -8,10 +8,45 @@ import logging
 import aiohttp
 import time
 
+
+def parse_hh_rlhf_text(text: str) -> list[dict]:
+    """Parse hh-rlhf text field into conversation turns."""
+    messages = []
+    parts = text.strip().split("\n\n")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith("Human: "):
+            messages.append({"role": "user", "content": part[len("Human: "):]})
+        elif part.startswith("Assistant: "):
+            messages.append({"role": "assistant", "content": part[len("Assistant: "):]})
+    return messages
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=600)
+QWEN_STOP_TOKEN_IDS = [151643, 151644, 151645]
+
+
+def response_is_empty(text: str) -> bool:
+    return (text or "").strip() == ""
+
+
+def response_has_user_prefix(text: str) -> bool:
+    prefix = (text or "").lstrip().lower()
+    return prefix.startswith("user\n") or prefix.startswith("user:") or prefix.startswith("<|im_start|>user")
+
+
+def response_has_assistant_prefix(text: str) -> bool:
+    prefix = (text or "").lstrip().lower()
+    return prefix.startswith("assistant") or prefix.startswith("<|im_start|>assistant")
+
+
+def response_is_eos_only(text: str, response_tokens: list[int]) -> bool:
+    return bool(response_tokens) and response_is_empty(text) and all(token in QWEN_STOP_TOKEN_IDS for token in response_tokens)
 
 
 def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenizer=None, chat_template_kwargs=None) -> list[str]:
@@ -29,8 +64,6 @@ def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenize
         for p in raw:
             if isinstance(p, str):
                 if p.lstrip().startswith("Human: "):
-                    from slime.local_rm.data import parse_hh_rlhf_text
-
                     msgs = parse_hh_rlhf_text(p)
                 else:
                     msgs = [{"role": "user", "content": p}]
@@ -63,15 +96,17 @@ async def wait_for_sglang_ready(session, url: str, timeout_s: int = 180):
     raise RuntimeError(f"SGLang at {url} was not ready after {timeout_s}s ({last_error})")
 
 
-async def generate_one(session, url, prompt, max_tokens, semaphore):
+async def generate_one(session, url, prompt, max_tokens, temperature, semaphore):
     async with semaphore:
         payload = {
             "text": prompt,
             "sampling_params": {
                 "max_new_tokens": max_tokens,
-                "temperature": 0,
-                "stop": ["\nHuman:", "\n\nHuman:", "<|im_end|>"],
-            }
+                "temperature": temperature,
+                "stop_token_ids": QWEN_STOP_TOKEN_IDS,
+                "skip_special_tokens": True,
+            },
+            "return_logprob": True,
         }
         last_error = None
         for attempt in range(1, 6):
@@ -84,12 +119,20 @@ async def generate_one(session, url, prompt, max_tokens, semaphore):
                     text = data.get("text", "")
                     if not isinstance(text, str):
                         raise RuntimeError(f"Unexpected response structure; keys={sorted(data.keys())}")
+                    meta_info = data.get("meta_info") or {}
+                    response_tokens = []
+                    if "output_token_logprobs" in meta_info:
+                        response_tokens = [item[1] for item in meta_info["output_token_logprobs"]]
                     # Defensive: strip prompt prefix if server returns full_text semantics
                     if text.startswith(prompt):
                         text = text[len(prompt):]
                     if text == "":
-                        logger.warning("Empty completion from SGLang (meta_info=%s)", data.get("meta_info"))
-                    return text
+                        logger.warning("Empty completion from SGLang (meta_info=%s)", meta_info)
+                    return {
+                        "text": text,
+                        "response_tokens": response_tokens,
+                        "finish_reason": meta_info.get("finish_reason"),
+                    }
             except Exception as e:
                 last_error = e
                 logger.warning("SGLang attempt %d/5 failed: %s", attempt, e)
@@ -110,22 +153,59 @@ async def run(args):
         args.prompt_data, args.prompt_key, args.apply_chat_template, tokenizer, chat_template_kwargs
     )
 
-    logger.info("Generating %d responses via SGLang at %s", len(formatted_prompts), args.sglang_url)
+    logger.info(
+        "Generating %d responses via SGLang at %s (temperature=%.3f)",
+        len(formatted_prompts),
+        args.sglang_url,
+        args.temperature,
+    )
 
     semaphore = asyncio.Semaphore(args.concurrency)
     t0 = time.time()
 
     async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
         await wait_for_sglang_ready(session, args.sglang_url)
-        tasks = [generate_one(session, args.sglang_url, p, args.max_new_tokens, semaphore)
+        tasks = [generate_one(session, args.sglang_url, p, args.max_new_tokens, args.temperature, semaphore)
                  for p in formatted_prompts]
         from tqdm.asyncio import tqdm as async_tqdm
-        responses = await async_tqdm.gather(*tasks, desc="generating")
+        response_records = await async_tqdm.gather(*tasks, desc="generating")
 
     elapsed = time.time() - t0
-    empty_count = sum(r == "" for r in responses)
+    responses = [record["text"] for record in response_records]
+    empty_count = sum(response_is_empty(r) for r in responses)
+    eos_only_count = sum(response_is_eos_only(record["text"], record["response_tokens"]) for record in response_records)
+    user_prefix_count = sum(response_has_user_prefix(r) for r in responses)
+    assistant_prefix_count = sum(response_has_assistant_prefix(r) for r in responses)
     if empty_count:
         logger.warning("Received %d empty completions out of %d", empty_count, len(responses))
+    if eos_only_count or user_prefix_count or assistant_prefix_count:
+        logger.warning(
+            "Eval pathologies: eos_only=%d user_prefix=%d assistant_prefix=%d out of %d",
+            eos_only_count,
+            user_prefix_count,
+            assistant_prefix_count,
+            len(responses),
+        )
+        anomaly_budget = 3
+        for raw_prompt, record in zip(raw_prompts, response_records, strict=True):
+            text = record["text"]
+            if anomaly_budget <= 0:
+                break
+            if not (
+                response_is_eos_only(text, record["response_tokens"])
+                or response_has_user_prefix(text)
+                or response_has_assistant_prefix(text)
+                or response_is_empty(text)
+            ):
+                continue
+            logger.warning(
+                "Eval pathology prompt_tail=%r response_prefix=%r response_tokens=%s finish_reason=%s",
+                str(raw_prompt)[-160:],
+                text[:160],
+                record["response_tokens"][:16],
+                record["finish_reason"],
+            )
+            anomaly_budget -= 1
     logger.info("Generated %d responses in %.1fs (%.1f/s)", len(responses), elapsed, len(responses)/elapsed)
 
     results = [{"prompt": raw_prompts[i], "response": responses[i]} for i in range(len(responses))]
@@ -144,6 +224,7 @@ def main():
     parser.add_argument("--prompt-key", default="text")
     parser.add_argument("--output", required=True)
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--apply-chat-template", action="store_true")
     parser.add_argument("--apply-chat-template-kwargs", type=str, default=None,
                         help='JSON string, e.g. \'{"enable_thinking":false}\'')

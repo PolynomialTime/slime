@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SFT training script — 4×H200, Qwen3-1.7B, hh-rlhf 10k samples, 2 epochs
+# SFT training script — 8×H200, Qwen3-8B, UltraFeedback SFT
 
 # for rerun the task
 pkill -9 sglang || true
@@ -70,7 +70,7 @@ SFT_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 1
+   --tensor-model-parallel-size 2
    --sequence-parallel
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
@@ -99,7 +99,7 @@ OPTIMIZER_ARGS=(
 WANDB_ARGS=(
    --use-tensorboard
    --tb-project-name slime-sft
-   --tb-experiment-name qwen3-1.7b-sft
+   --tb-experiment-name qwen3-8b-sft
 )
 
 MISC_ARGS=(
@@ -112,7 +112,7 @@ MISC_ARGS=(
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export no_proxy="127.0.0.1,${MASTER_ADDR}"
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 4 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
@@ -127,7 +127,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train_async.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 4 \
+   --actor-num-gpus-per-node 2 \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${SFT_ARGS[@]} \

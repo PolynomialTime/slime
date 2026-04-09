@@ -1,11 +1,13 @@
 import logging
 import os
 import re
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 # TODO: may need to copy those 2 functions and do refactoring.
 from megatron.training.checkpointing import load_checkpoint as _load_checkpoint_megatron
-from megatron.training.checkpointing import save_checkpoint
+from megatron.training.checkpointing import save_checkpoint as _save_checkpoint_megatron
 from megatron.training.global_vars import get_args
 
 from slime.utils import megatron_bridge_utils
@@ -92,6 +94,40 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 __all__ = ["save_checkpoint"]
+
+
+@contextmanager
+def _force_legacy_torch_save_serialization():
+    """Work around distributed checkpoint write corruption on shared storage.
+
+    Megatron's distributed checkpoint writer ultimately uses `torch.save` for the
+    shard payloads. On this cluster/storage combination, the default zip-based
+    serializer intermittently fails with:
+
+        inline_container.cc:664 unexpected pos ... vs ...
+
+    For checkpoint shards, the legacy non-zip format is fully loadable via
+    `torch.load`, and it avoids the inline container writer path entirely.
+    """
+    import torch
+
+    original_torch_save = torch.save
+
+    @wraps(original_torch_save)
+    def legacy_torch_save(*args, **kwargs):
+        kwargs.setdefault("_use_new_zipfile_serialization", False)
+        return original_torch_save(*args, **kwargs)
+
+    torch.save = legacy_torch_save
+    try:
+        yield
+    finally:
+        torch.save = original_torch_save
+
+
+def save_checkpoint(*args, **kwargs):
+    with _force_legacy_torch_save_serialization():
+        return _save_checkpoint_megatron(*args, **kwargs)
 
 
 def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_context, skip_load_to_model_and_opt):

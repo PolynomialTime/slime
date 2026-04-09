@@ -15,14 +15,107 @@ _WORKER = None
 _LOCK = threading.Lock()
 _SERVER_PROC = None
 _MODEL_MTIME = 0.0
-_MAX_RESPONSE_LEN = 512
+_LAST_SERVER_ACTIVITY = 0.0
+_MAX_RESPONSE_LEN = int(os.environ.get("SLIME_CUSTOM_RM_MAX_RESPONSE_LEN", "384"))
 _SHORT_RESPONSE_THRESHOLD = 50
 _TRUNCATION_THRESHOLD = int(0.9 * _MAX_RESPONSE_LEN)
 _SHORT_PENALTY = 1.0
-_TRUNCATION_PENALTY = 10.0
+# Keep length shaping symmetric so truncation does not structurally favor short hedge replies.
+_TRUNCATION_PENALTY = 1.0
 _HUMAN_CONTINUATION_PENALTY = 5.0
 _ASSISTANT_PREFIX_PENALTY = 2.0
 _REPETITION_PENALTY_MAX = 3.0
+
+
+def _parse_env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning("[custom_rm] invalid %s=%r, using default=%s", name, value, default)
+        return default
+
+
+_IDLE_TIMEOUT_SEC = max(0.0, _parse_env_float("SLIME_CUSTOM_RM_IDLE_TIMEOUT_SEC", 0.0))
+
+
+def _parse_visible_device_list(raw_value: str) -> list[str]:
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def _query_gpu_free_memory_mb() -> dict[str, int]:
+    try:
+        output = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+        )
+    except Exception as e:
+        logger.warning("[custom_rm] failed to query GPU free memory with nvidia-smi: %s", e)
+        return {}
+
+    free_memory_by_gpu = {}
+    for line in output.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
+            continue
+        gpu_id, free_mb = parts[0], parts[1]
+        try:
+            free_memory_by_gpu[gpu_id] = int(free_mb)
+        except ValueError:
+            continue
+    return free_memory_by_gpu
+
+
+def _select_reward_gpu(candidate_gpu_ids: list[str]) -> tuple[str | None, str]:
+    if not candidate_gpu_ids:
+        return None, "no candidate GPUs"
+
+    free_memory_by_gpu = _query_gpu_free_memory_mb()
+    if free_memory_by_gpu:
+        ranked = []
+        for gpu_id in candidate_gpu_ids:
+            free_mb = free_memory_by_gpu.get(gpu_id, -1)
+            try:
+                numeric_gpu_id = int(gpu_id)
+            except ValueError:
+                numeric_gpu_id = -1
+            ranked.append((free_mb, numeric_gpu_id, gpu_id))
+        ranked.sort(reverse=True)
+        best_free_mb, _, best_gpu_id = ranked[0]
+        return best_gpu_id, f"auto-selected from {candidate_gpu_ids} by free memory, best_free_mb={best_free_mb}"
+
+    # Fallback when nvidia-smi is unavailable: prefer the highest-index GPU rather than pinning GPU 0.
+    return candidate_gpu_ids[-1], f"fallback-selected last visible GPU from {candidate_gpu_ids}"
+
+
+def _resolve_reward_device() -> tuple[str, str, str]:
+    requested_device = (os.environ.get("SLIME_CUSTOM_RM_DEVICE") or "").strip().lower()
+    requested_visible_devices = (os.environ.get("SLIME_CUSTOM_RM_CUDA_VISIBLE_DEVICES") or "").strip()
+
+    if requested_device in {"cpu", "none"}:
+        return "", "cpu", "forced cpu"
+
+    auto_tokens = {"", "auto", "best", "max_free"}
+    if requested_visible_devices.lower() in auto_tokens:
+        visible_devices = (
+            os.environ.get("_REAL_CUDA_VISIBLE_DEVICES")
+            or os.environ.get("CUDA_VISIBLE_DEVICES")
+            or "0,1,2,3"
+        )
+        candidate_gpu_ids = _parse_visible_device_list(visible_devices)
+    else:
+        candidate_gpu_ids = _parse_visible_device_list(requested_visible_devices)
+
+    gpu_id, reason = _select_reward_gpu(candidate_gpu_ids)
+    if gpu_id is None:
+        return "", "cpu", reason
+    return gpu_id, "cuda", reason
 
 
 class _Request:
@@ -33,12 +126,40 @@ class _Request:
         self.done = threading.Event()
 
 
+def _read_process_stderr(proc):
+    if proc is None or proc.stderr is None:
+        return ""
+    try:
+        return proc.stderr.read().strip()
+    except Exception as e:
+        return f"<failed to read stderr: {e}>"
+
+
+def _drain_pending_requests():
+    drained = 0
+    while True:
+        try:
+            req = _QUEUE.get_nowait()
+        except queue.Empty:
+            return drained
+        req.result = 0.0
+        req.done.set()
+        drained += 1
+
+
 def _start_server(base_model, model_path):
     """Start persistent scoring server subprocess on dedicated GPU."""
-    global _SERVER_PROC, _MODEL_MTIME
-    gpu_id = os.environ.get("_REAL_CUDA_VISIBLE_DEVICES", "0,1,2,3").strip().split(",")[-1].strip()
+    global _SERVER_PROC, _MODEL_MTIME, _LAST_SERVER_ACTIVITY
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = gpu_id
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    resolved_visible_devices, device, selection_reason = _resolve_reward_device()
+
+    if device == "cpu":
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        device_desc = "cpu"
+    else:
+        env["CUDA_VISIBLE_DEVICES"] = resolved_visible_devices
+        device_desc = resolved_visible_devices
 
     _SERVER_PROC = subprocess.Popen(
         [sys.executable, "-m", "slime.local_rm.score_server"],
@@ -46,20 +167,89 @@ def _start_server(base_model, model_path):
         text=True, env=env, bufsize=1,
     )
     # Send config
-    config = json.dumps({"base_model": base_model, "model_path": model_path})
+    config = json.dumps({"base_model": base_model, "model_path": model_path, "device": device})
     _SERVER_PROC.stdin.write(config + "\n")
     _SERVER_PROC.stdin.flush()
 
     # Wait for ready
-    ready = _SERVER_PROC.stdout.readline()
-    resp = json.loads(ready)
-    logger.info("[custom_rm] score server started on GPU %s, device=%s", gpu_id, resp.get("device"))
+    proc = _SERVER_PROC
+    ready = proc.stdout.readline()
+    if not ready:
+        returncode = proc.poll()
+        stderr = _read_process_stderr(proc)
+        logger.error(
+            "[custom_rm] score server exited before ready on %s (returncode=%s). stderr:\n%s",
+            device_desc, returncode, stderr or "<empty>",
+        )
+        _stop_server(reason="startup failed before ready")
+        raise RuntimeError(
+            f"score server exited before ready on {device_desc} (returncode={returncode}). "
+            f"Likely CUDA OOM or import/init failure. stderr: {stderr or '<empty>'}"
+        )
+    try:
+        resp = json.loads(ready)
+    except json.JSONDecodeError as e:
+        logger.error("[custom_rm] invalid score server ready payload on %s: %r", device_desc, ready.rstrip())
+        _stop_server(reason="invalid startup response")
+        raise RuntimeError(
+            f"invalid score server ready payload on {device_desc}: {ready.rstrip()!r}"
+        ) from e
+    logger.info(
+        "[custom_rm] score server started on %s, device=%s (%s)",
+        device_desc,
+        resp.get("device"),
+        selection_reason,
+    )
     _MODEL_MTIME = os.path.getmtime(model_path)
+    _LAST_SERVER_ACTIVITY = time.monotonic()
+
+
+def _stop_server(reason: str | None = None):
+    global _SERVER_PROC, _MODEL_MTIME, _LAST_SERVER_ACTIVITY
+    proc = _SERVER_PROC
+    _SERVER_PROC = None
+    _MODEL_MTIME = 0.0
+    _LAST_SERVER_ACTIVITY = 0.0
+    if proc is None:
+        return
+
+    if reason is not None:
+        logger.info("[custom_rm] stopping score server: %s", reason)
+
+    try:
+        if proc.stdin is not None and not proc.stdin.closed:
+            proc.stdin.close()
+    except Exception:
+        pass
+
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+    except Exception as e:
+        logger.warning("[custom_rm] failed to stop score server cleanly: %s", e)
+    finally:
+        for stream_name in ("stdout", "stderr"):
+            stream = getattr(proc, stream_name, None)
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+
+def release_resources(args=None, reason: str | None = None):
+    with _LOCK:
+        _stop_server(reason=reason or "external release")
 
 
 def _ensure_server(base_model, model_path):
     """Ensure server is running and model is up to date."""
-    global _SERVER_PROC, _MODEL_MTIME
+    global _SERVER_PROC, _MODEL_MTIME, _LAST_SERVER_ACTIVITY
     mtime = os.path.getmtime(model_path)
     if _SERVER_PROC is None or _SERVER_PROC.poll() is not None:
         _start_server(base_model, model_path)
@@ -70,25 +260,44 @@ def _ensure_server(base_model, model_path):
         resp = json.loads(_SERVER_PROC.stdout.readline())
         logger.info("[custom_rm] model reloaded: %s", resp)
         _MODEL_MTIME = mtime
+        _LAST_SERVER_ACTIVITY = time.monotonic()
 
 
 def _score_batch_via_server(tokens_list):
     """Send batch to server, get rewards back."""
+    global _LAST_SERVER_ACTIVITY
     request = json.dumps({"tokens": tokens_list})
     _SERVER_PROC.stdin.write(request + "\n")
     _SERVER_PROC.stdin.flush()
     response = _SERVER_PROC.stdout.readline()
+    _LAST_SERVER_ACTIVITY = time.monotonic()
     return json.loads(response)
 
 
 def _worker_loop(base_model, model_path):
     """Collect samples, score via persistent GPU server."""
-    _ensure_server(base_model, model_path)
+    try:
+        _ensure_server(base_model, model_path)
+    except Exception:
+        drained = _drain_pending_requests()
+        logger.exception(
+            "[custom_rm] failed to initialize score server; drained %d queued requests and exiting worker",
+            drained,
+        )
+        return
+    queue_timeout = 1.0 if _IDLE_TIMEOUT_SEC > 0 else 120.0
 
     while True:
         try:
-            first = _QUEUE.get(timeout=120)
+            first = _QUEUE.get(timeout=queue_timeout)
         except queue.Empty:
+            if (
+                _IDLE_TIMEOUT_SEC > 0
+                and _SERVER_PROC is not None
+                and _LAST_SERVER_ACTIVITY > 0
+                and time.monotonic() - _LAST_SERVER_ACTIVITY >= _IDLE_TIMEOUT_SEC
+            ):
+                _stop_server(reason=f"idle for {_IDLE_TIMEOUT_SEC:.1f}s")
             continue
 
         # Collect batch (100ms window)
@@ -184,12 +393,11 @@ async def custom_rm(args, samples):
     if not os.path.exists(model_path):
         return [0.0] * len(samples) if isinstance(samples, list) else 0.0
 
-    _ensure_worker(args)
-
     if isinstance(samples, list):
         reqs = [_Request(s.tokens) for s in samples]
         for req in reqs:
             _QUEUE.put(req)
+        _ensure_worker(args)
 
         def _wait_all():
             for r in reqs:
@@ -199,6 +407,7 @@ async def custom_rm(args, samples):
 
     req = _Request(samples.tokens)
     _QUEUE.put(req)
+    _ensure_worker(args)
 
     def _wait():
         req.done.wait(timeout=120)

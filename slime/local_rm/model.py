@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -35,6 +36,34 @@ class ScalarModelConfig(PretrainedConfig):
         self.c_coef = getattr(self, "c_coef", 1.0)
 
 
+def _finite_float_or_default(value: Any, default: float) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) else default
+
+
+def get_reward_normalization_stats(config: ScalarModelConfig) -> tuple[float, float]:
+    bias = _finite_float_or_default(getattr(config, "bias", 0.0), 0.0)
+    normalization_constant = _finite_float_or_default(
+        getattr(config, "normalization_constant", 1.0),
+        1.0,
+    )
+    if normalization_constant < 1e-3:
+        normalization_constant = 1e-3
+    return bias, normalization_constant
+
+
+def sanitize_scalar_model_config(config: ScalarModelConfig) -> ScalarModelConfig:
+    bias, normalization_constant = get_reward_normalization_stats(config)
+    config.bias = bias
+    config.normalization_constant = normalization_constant
+    config.c_coef = _finite_float_or_default(getattr(config, "c_coef", 1.0), 1.0)
+    config.reward_max = _finite_float_or_default(getattr(config, "reward_max", 5.0), 5.0)
+    return config
+
+
 class ScalarModel(PreTrainedModel):
     config_class = ScalarModelConfig
 
@@ -59,8 +88,9 @@ class ScalarModel(PreTrainedModel):
             return_dict=True,
         )
         rewards = self.scalar_head(output.last_hidden_state)
-        rewards = rewards - float(self.config.bias)
-        rewards = rewards / float(self.config.normalization_constant)
+        bias, normalization_constant = get_reward_normalization_stats(self.config)
+        rewards = rewards - bias
+        rewards = rewards / normalization_constant
         return rewards
 
     @classmethod
@@ -87,10 +117,11 @@ class RunningMeanStd:
         return torch.sqrt(self.var + 1e-8)
 
     @torch.no_grad()
-    def update_from_batch(self, x: torch.Tensor) -> None:
+    def update_from_batch(self, x: torch.Tensor) -> bool:
         x = x.float().reshape(-1)
+        x = x[torch.isfinite(x)]
         if x.numel() == 0:
-            return
+            return False
         b_mean = x.mean()
         b_var = x.var(unbiased=False)
         b_count = torch.tensor(float(x.numel()), device=x.device)
@@ -104,7 +135,14 @@ class RunningMeanStd:
         m2 = m_a + m_b + delta * delta * self.count * b_count / tot
         new_var = m2 / tot
 
+        if not (
+            torch.isfinite(new_mean).item()
+            and torch.isfinite(new_var).item()
+            and torch.isfinite(tot).item()
+        ):
+            return False
         self.mean, self.var, self.count = new_mean, new_var, tot
+        return True
 
 
 def load_tokenizer(model_name_or_path: str):
@@ -130,6 +168,7 @@ def init_reward_model(base_model: str, reward_model_path: str | None):
             for key in ("bias", "normalization_constant", "c_coef", "reward_max"):
                 if key in saved_cfg:
                     setattr(cfg, key, saved_cfg[key])
+        sanitize_scalar_model_config(cfg)
         # Create architecture and load weights
         # Untie weights to ensure all params are saved/loaded independently
         cfg.tie_word_embeddings = False
@@ -161,6 +200,7 @@ def init_reward_model(base_model: str, reward_model_path: str | None):
         base_config=base_config,
         hidden_size=base_config.hidden_size,
     )
+    sanitize_scalar_model_config(cfg)
     return ScalarModel(cfg)
 
 
@@ -193,13 +233,72 @@ def get_sequence_rewards(
     return rewards_token[torch.arange(rewards_token.size(0), device=device), last_idx]
 
 
-def tokenize_prompt_answer(
+def is_cuda_oom_error(exc: BaseException) -> bool:
+    if isinstance(exc, torch.OutOfMemoryError):
+        return True
+    message = str(exc).lower()
+    return "cuda" in message and "out of memory" in message
+
+
+@torch.inference_mode()
+def get_sequence_rewards_adaptive(
+    model: ScalarModel,
+    tokens_list: list[list[int]],
+    pad_id: int,
+    device: torch.device | str,
+    max_batch_size: int | None = None,
+    max_batch_tokens: int | None = None,
+) -> torch.Tensor:
+    if not tokens_list:
+        return torch.empty(0, dtype=torch.float32)
+
+    device = torch.device(device)
+    stable_batch_size = len(tokens_list) if max_batch_size is None or max_batch_size <= 0 else max_batch_size
+    max_batch_tokens = None if max_batch_tokens is None or max_batch_tokens <= 0 else max_batch_tokens
+
+    outputs = []
+    start = 0
+    while start < len(tokens_list):
+        batch_size = min(stable_batch_size, len(tokens_list) - start)
+
+        while True:
+            end = min(start + batch_size, len(tokens_list))
+            if max_batch_tokens is not None:
+                total_tokens = 0
+                bounded_end = start
+                while bounded_end < end:
+                    sample_tokens = len(tokens_list[bounded_end])
+                    if bounded_end > start and total_tokens + sample_tokens > max_batch_tokens:
+                        break
+                    total_tokens += sample_tokens
+                    bounded_end += 1
+                end = max(start + 1, bounded_end)
+
+            current_tokens = tokens_list[start:end]
+            try:
+                rewards = get_sequence_rewards(model, current_tokens, pad_id, device)
+                outputs.append(rewards.detach().cpu())
+                stable_batch_size = min(stable_batch_size, len(current_tokens))
+                start = end
+                break
+            except RuntimeError as exc:
+                if not is_cuda_oom_error(exc):
+                    raise
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+                if len(current_tokens) == 1:
+                    raise
+                batch_size = max(1, len(current_tokens) // 2)
+
+    return torch.cat(outputs, dim=0)
+
+
+def build_prompt_text(
     tokenizer,
     prompt: str | list[dict],
-    answer: str,
     apply_chat_template: bool,
     apply_chat_template_kwargs: dict | None = None,
-) -> DemoSample:
+) -> str:
     if apply_chat_template:
         if isinstance(prompt, str):
             if prompt.lstrip().startswith("Human: "):
@@ -208,14 +307,28 @@ def tokenize_prompt_answer(
                 prompt = parse_hh_rlhf_text(prompt)
             else:
                 prompt = [{"role": "user", "content": prompt}]
-        prompt_text = tokenizer.apply_chat_template(
+        return tokenizer.apply_chat_template(
             prompt,
             tokenize=False,
             add_generation_prompt=True,
             **(apply_chat_template_kwargs or {}),
         )
-    else:
-        prompt_text = prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+    return prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+
+
+def tokenize_prompt_answer(
+    tokenizer,
+    prompt: str | list[dict],
+    answer: str,
+    apply_chat_template: bool,
+    apply_chat_template_kwargs: dict | None = None,
+) -> DemoSample:
+    prompt_text = build_prompt_text(
+        tokenizer,
+        prompt,
+        apply_chat_template=apply_chat_template,
+        apply_chat_template_kwargs=apply_chat_template_kwargs,
+    )
 
     prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
     answer_ids = tokenizer(answer, add_special_tokens=False)["input_ids"]

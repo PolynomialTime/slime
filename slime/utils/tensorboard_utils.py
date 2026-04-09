@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class _TensorboardAdapter(metaclass=SingletonMeta):
-    _writer = None
+    _writers = None
+    _tensorboard_dir = None
 
     """
     # Usage example: This will return the same instance every rank
@@ -44,7 +45,31 @@ class _TensorboardAdapter(metaclass=SingletonMeta):
         tensorboard_dir = os.environ.get("TENSORBOARD_DIR", f"tensorboard_log/{tb_project_name}/{tb_experiment_name}")
         os.makedirs(tensorboard_dir, exist_ok=True)
         logger.info(f"Saving tensorboard log to {tensorboard_dir}.")
-        self._writer = SummaryWriter(tensorboard_dir)
+        self._tensorboard_dir = tensorboard_dir
+        self._writers = {}
+
+    def _stream_for_key(self, key: str) -> str:
+        if key.startswith("train/critic-"):
+            return "critic"
+        if key.startswith("train/"):
+            return "actor"
+        if key.startswith("rollout/") or key.startswith("perf/"):
+            return "rollout"
+        if key.startswith("reward/"):
+            return "reward"
+        return "misc"
+
+    def _get_writer(self, stream: str):
+        writer = self._writers.get(stream)
+        if writer is not None:
+            return writer
+
+        writer_dir = os.path.join(self._tensorboard_dir, stream)
+        os.makedirs(writer_dir, exist_ok=True)
+        logger.info("Saving tensorboard %s log to %s.", stream, writer_dir)
+        writer = SummaryWriter(writer_dir)
+        self._writers[stream] = writer
+        return writer
 
     def log(self, data, step):
         """Log data to tensorboard
@@ -53,9 +78,11 @@ class _TensorboardAdapter(metaclass=SingletonMeta):
             data (dict): Dictionary containing metric names and values
             step (int): Current step/epoch number
         """
-        for key in data:
-            self._writer.add_scalar(key, data[key], step)
+        for key, value in data.items():
+            writer = self._get_writer(self._stream_for_key(key))
+            writer.add_scalar(key, value, step)
 
     def finish(self):
         """Close the tensorboard writer"""
-        self._writer.close()
+        for writer in (self._writers or {}).values():
+            writer.close()

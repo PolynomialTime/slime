@@ -723,6 +723,38 @@ def _log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_
     logging_utils.log(args, log_dict, step_key="rollout/step")
 
 
+def _sample_response_stripped(sample: Sample) -> str:
+    return (sample.response or "").strip()
+
+
+def _sample_response_prefix(sample: Sample) -> str:
+    return (sample.response or "").lstrip()
+
+
+def _sample_is_empty(sample: Sample) -> bool:
+    return _sample_response_stripped(sample) == ""
+
+
+def _sample_is_eos_only(args, sample: Sample) -> bool:
+    if sample.response_length <= 0 or not _sample_is_empty(sample) or len(sample.tokens) < sample.response_length:
+        return False
+    stop_token_ids = {int(token_id) for token_id in (getattr(args, "rollout_stop_token_ids", None) or [])}
+    if not stop_token_ids:
+        return False
+    response_tokens = sample.tokens[-sample.response_length :]
+    return bool(response_tokens) and all(token in stop_token_ids for token in response_tokens)
+
+
+def _sample_has_user_prefix(sample: Sample) -> bool:
+    prefix = _sample_response_prefix(sample).lower()
+    return prefix.startswith("user\n") or prefix.startswith("user:") or prefix.startswith("<|im_start|>user")
+
+
+def _sample_has_assistant_prefix(sample: Sample) -> bool:
+    prefix = _sample_response_prefix(sample).lower()
+    return prefix.startswith("assistant") or prefix.startswith("<|im_start|>assistant")
+
+
 def compute_metrics_from_samples(args, samples):
     response_lengths = [sample.effective_response_length for sample in samples]
 
@@ -731,6 +763,10 @@ def compute_metrics_from_samples(args, samples):
     log_dict |= _compute_zero_std_metrics(args, samples)
     log_dict |= _compute_reward_cat_metrics(args, samples)
     log_dict["repetition_frac"] = np.mean([int(has_repetition(s.response)) for s in samples]).item()
+    log_dict["empty_rate"] = np.mean([int(_sample_is_empty(s)) for s in samples]).item()
+    log_dict["eos_only_rate"] = np.mean([int(_sample_is_eos_only(args, s)) for s in samples]).item()
+    log_dict["user_prefix_rate"] = np.mean([int(_sample_has_user_prefix(s)) for s in samples]).item()
+    log_dict["assistant_prefix_rate"] = np.mean([int(_sample_has_assistant_prefix(s)) for s in samples]).item()
     log_dict["truncated_ratio"] = np.mean([int(s.status == Sample.Status.TRUNCATED) for s in samples]).item()
     return log_dict
 

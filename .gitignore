@@ -201,3 +201,8 @@ CLAUDE.md
 
 execute*
 hh*
+data/*
+tensorboard*
+eval*
+eval/*
+ultra*

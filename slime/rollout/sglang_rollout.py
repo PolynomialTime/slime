@@ -23,11 +23,87 @@ from slime.utils.misc import SingletonMeta, load_function
 from slime.utils.processing_utils import encode_image_for_rollout_engine, load_processor, load_tokenizer
 from slime.utils.types import Sample
 
-from .rm_hub import async_rm, batched_async_rm
+from .rm_hub import async_rm, batched_async_rm, release_rm_resources
 
 __all__ = ["generate_rollout"]
 
 logger = logging.getLogger(__name__)
+
+
+def _format_sample_log(title: str, sample: Sample) -> str:
+    prompt_tail = str(sample.prompt)[-320:]
+    response_preview = (sample.response or "")[:320]
+    label_preview = str(sample.label)[:120]
+    return (
+        f"{title}:\n"
+        f"  status: {sample.status.value}\n"
+        f"  response_len: {sample.response_length}\n"
+        f"  reward: {sample.reward}\n"
+        f"  label: {label_preview}\n"
+        f"  prompt_tail: {prompt_tail!r}\n"
+        f"  response_preview: {response_preview!r}"
+    )
+
+
+def _response_prefix(text: str) -> str:
+    return (text or "").lstrip()
+
+
+def _response_is_empty(text: str) -> bool:
+    return (text or "").strip() == ""
+
+
+def _response_has_user_prefix(text: str) -> bool:
+    prefix = _response_prefix(text).lower()
+    return prefix.startswith("user\n") or prefix.startswith("user:") or prefix.startswith("<|im_start|>user")
+
+
+def _response_has_assistant_prefix(text: str) -> bool:
+    prefix = _response_prefix(text).lower()
+    return prefix.startswith("assistant") or prefix.startswith("<|im_start|>assistant")
+
+
+def _response_is_eos_only(args: Namespace, sample: Sample) -> bool:
+    if sample.response_length <= 0 or not _response_is_empty(sample.response) or len(sample.tokens) < sample.response_length:
+        return False
+    stop_token_ids = {int(token_id) for token_id in (getattr(args, "rollout_stop_token_ids", None) or [])}
+    if not stop_token_ids:
+        return False
+    response_tokens = sample.tokens[-sample.response_length :]
+    return bool(response_tokens) and all(token in stop_token_ids for token in response_tokens)
+
+
+def _maybe_log_pathology(args: Namespace, sample: Sample, budgets: dict[str, int]) -> None:
+    tags = []
+    if _response_is_empty(sample.response):
+        tags.append("empty")
+    if _response_is_eos_only(args, sample):
+        tags.append("eos_only")
+    if _response_has_user_prefix(sample.response):
+        tags.append("user_prefix")
+    if _response_has_assistant_prefix(sample.response):
+        tags.append("assistant_prefix")
+    if not tags:
+        return
+    if not any(budgets.get(tag, 0) > 0 for tag in tags):
+        return
+
+    for tag in tags:
+        if budgets.get(tag, 0) > 0:
+            budgets[tag] -= 1
+
+    prompt_tail = str(sample.prompt)[-160:]
+    response_tokens = sample.tokens[-sample.response_length :] if sample.response_length > 0 else []
+    logger.warning(
+        "rollout pathology=%s status=%s response_len=%s reward=%s prompt_tail=%r response_prefix=%r response_tokens=%s",
+        ",".join(tags),
+        sample.status.value,
+        sample.response_length,
+        sample.reward,
+        prompt_tail,
+        (sample.response or "")[:160],
+        response_tokens[:16],
+    )
 
 
 class GenerateState(metaclass=SingletonMeta):
@@ -359,6 +435,12 @@ async def generate_rollout_async(
     data = []
     all_data = []
     do_print = True
+    pathology_log_budgets = {
+        "empty": 3,
+        "eos_only": 3,
+        "user_prefix": 3,
+        "assistant_prefix": 3,
+    }
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
     while len(data) < target_data_size:
         while state.remaining_batch_size < target_data_size:
@@ -373,12 +455,12 @@ async def generate_rollout_async(
 
             if do_print:
                 sample = group[0][0] if isinstance(group[0], list) else group[0]
-                logger.info(
-                    f"First rollout sample: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
-                )
+                logger.info(_format_sample_log("First rollout sample", sample))
                 do_print = False
 
             assert len(group) == args.n_samples_per_prompt
+            for sample in group:
+                _maybe_log_pathology(args, sample, pathology_log_budgets)
             all_data.append(group)
             dynamic_filter_output = call_dynamic_filter(dynamic_filter, args, group)
             if not dynamic_filter_output.keep:
@@ -394,9 +476,7 @@ async def generate_rollout_async(
 
     pbar.close()
     sample = data[-1][0][0] if isinstance(data[-1][0], list) else data[-1][0]
-    logger.info(
-        f"Finish rollout: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
-    )
+    logger.info(_format_sample_log("Finish rollout sample", sample))
 
     # there are still some unfinished requests, abort them
     aborted_samples = await abort(args, rollout_id)
@@ -417,6 +497,9 @@ async def generate_rollout_async(
     if args.rollout_all_samples_process_path is not None:
         process_func = load_function(args.rollout_all_samples_process_path)
         process_func(args, all_samples, data_source)
+
+    # Release any custom RM sidecar process before actor/critic training starts.
+    await release_rm_resources(args, reason=f"rollout {rollout_id} finished")
 
     return RolloutFnTrainOutput(samples=data, metrics=metric_gatherer.collect()), aborted_samples
 
@@ -514,11 +597,7 @@ async def eval_rollout_single_dataset(
     for coro in asyncio.as_completed(tasks):
         sample = await coro
         if do_print:
-            logger.info(
-                "eval_rollout_single_dataset example data: "
-                f"{[str(sample.prompt) + sample.response]} "
-                f"reward={sample.reward}"
-            )
+            logger.info(_format_sample_log("Eval rollout example", sample))
             do_print = False
         if isinstance(sample, list):
             data.extend(sample)

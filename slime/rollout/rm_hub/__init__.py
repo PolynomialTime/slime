@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import random
 
 import aiohttp
@@ -84,3 +85,21 @@ async def batched_async_rm(
     tasks = [async_rm(args, sample, **kwargs) for sample in samples]
     rewards = await asyncio.gather(*tasks)
     return rewards
+
+
+async def release_rm_resources(args, **kwargs) -> None:
+    if args.custom_rm_path is None:
+        return
+
+    module_path, _, _ = args.custom_rm_path.rpartition(".")
+    if not module_path:
+        return
+
+    module = importlib.import_module(module_path)
+    release_fn = getattr(module, "release_resources", None)
+    if release_fn is None:
+        return
+
+    result = release_fn(args, **kwargs)
+    if asyncio.iscoroutine(result):
+        await result
