@@ -30,7 +30,8 @@ def reward_eval(args, rollout_id: int) -> None:
         return
 
     reward_dir = Path(args.reward_model_dir)
-    model_path = reward_dir / "latest"
+    model_path_value = getattr(args, "reward_model_path", None)
+    model_path = Path(model_path_value) if model_path_value else reward_dir / "latest"
     if not model_path.exists():
         logger.info("reward_eval: reward model %s not found, skipping", model_path)
         return
@@ -108,30 +109,40 @@ def reward_eval(args, rollout_id: int) -> None:
 
     acc = correct / total
     margin = margin_sum / total
+    eval_source = getattr(args, "reward_eval_source", None) or "external"
     logger.info(
-        "reward_eval rollout=%s samples=%s acc=%.4f margin=%.4f positive_path=%s target_path=%s missing=%s",
+        "reward_eval rollout=%s source=%s samples=%s acc=%.4f margin=%.4f positive_path=%s target_path=%s missing=%s model_path=%s",
         rollout_id,
+        eval_source,
         total,
         acc,
         margin,
         eval_path,
         target_path,
         missing,
+        model_path,
     )
 
-    out_path = reward_dir / f"reward_eval_rollout_{rollout_id}.json"
+    out_path_value = getattr(args, "reward_eval_output_path", None)
+    out_path = Path(out_path_value) if out_path_value else reward_dir / f"reward_eval_rollout_{rollout_id}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "rollout_id": rollout_id,
+                "eval_source": eval_source,
                 "matched_acc": acc,
                 "matched_margin": margin,
                 "correct": correct,
                 "total": total,
+                "positive": len(positive_samples),
+                "targets": len(target_samples),
                 "missing": missing,
+                "model_path": str(model_path),
                 "positive_path": eval_path,
                 "target_path": target_path,
             },
             f,
+            indent=2,
         )
     logger.info("reward_eval: saved results to %s", out_path)

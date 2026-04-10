@@ -6,6 +6,9 @@ set -ex
 SLIME=/mnt/shared-storage-gpfs2/wangqianyi2/slime
 cd $SLIME
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
+REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
+SFT_SYNTH_DATA_PATH=${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.jsonl}
+SFT_SYNTH_REPORT_PATH=${SFT_SYNTH_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.report.json}
 
 KEEP_ALL_ROUND_CHECKPOINTS=${KEEP_ALL_ROUND_CHECKPOINTS:-0}
 EVAL_TEMPERATURE=${EVAL_TEMPERATURE:-0.2}
@@ -13,9 +16,12 @@ MIN_FREE_DISK_GB=${MIN_FREE_DISK_GB:-}
 MIN_FREE_DISK_GB_PPO=${MIN_FREE_DISK_GB_PPO:-${MIN_FREE_DISK_GB:-60}}
 MIN_FREE_DISK_GB_EXPORT=${MIN_FREE_DISK_GB_EXPORT:-${MIN_FREE_DISK_GB:-30}}
 START_ROUND=${START_ROUND:-1}
+FROM_SCRATCH=${FROM_SCRATCH:-0}
 NUM_ROUNDS=7
 NUM_ROLLOUT_PER_ROUND=150
 TEST_DATA=$ULTRAFEEDBACK_DIR/uf-test.jsonl
+REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test-synth-chosen.jsonl}
+REWARD_EXTERNAL_EVAL_BATCH_SIZE=${REWARD_EXTERNAL_EVAL_BATCH_SIZE:-32}
 EXPECTED_EVAL_LINES=2000
 if [ -f "$TEST_DATA" ]; then
   ACTUAL_EVAL_LINES=$(awk 'END {print NR}' "$TEST_DATA")
@@ -24,12 +30,61 @@ if [ -f "$TEST_DATA" ]; then
   fi
 fi
 
-echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS EVAL_TEMPERATURE=$EVAL_TEMPERATURE MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT"
-
 SFT_HF_DIR=$SLIME/models/sft_checkpoint_8b_hf
 SFT_MEGATRON_DIR=$SLIME/models/sft_checkpoint
 SFT_BASELINE=$SLIME/eval/outputs_sft_baseline.jsonl
-SFT_DATA_PATH=${SFT_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean.jsonl}
+SFT_DATA_PATH=${SFT_DATA_PATH:-}
+if [ -z "$SFT_DATA_PATH" ]; then
+  if [ -f "$SFT_SYNTH_DATA_PATH" ]; then
+    SFT_DATA_PATH=$SFT_SYNTH_DATA_PATH
+  else
+    SFT_DATA_PATH=$ULTRAFEEDBACK_DIR/uf-sft-clean.jsonl
+  fi
+fi
+
+echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS SFT_DATA_PATH=$SFT_DATA_PATH EVAL_TEMPERATURE=$EVAL_TEMPERATURE MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+
+ensure_synth_sft_data() {
+  if [ -f "$SFT_DATA_PATH" ]; then
+    return 0
+  fi
+  if [ "$SFT_DATA_PATH" != "$SFT_SYNTH_DATA_PATH" ]; then
+    return 0
+  fi
+  local synth_input=$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl
+  if [ ! -f "$synth_input" ]; then
+    echo "ERROR: missing synthetic train chosen data at $synth_input" >&2
+    echo "ERROR: generate uf-train-synth-chosen.jsonl before running from synthetic SFT data." >&2
+    exit 1
+  fi
+  echo "===== Building synthetic SFT clean dataset ====="
+  python3 scripts/build_sft_clean_from_synth.py \
+    --input "$synth_input" \
+    --output "$SFT_SYNTH_DATA_PATH" \
+    --report "$SFT_SYNTH_REPORT_PATH"
+}
+
+reset_pipeline_state() {
+  echo "===== FROM_SCRATCH=1: removing derived pipeline artifacts ====="
+  rm -rf "$SFT_HF_DIR" "$SFT_MEGATRON_DIR" "$REWARD_DIR" "$SLIME/models/save_dir_bootstrap"
+  shopt -s nullglob
+  for path in \
+    "$SLIME"/models/save_dir_r* \
+    "$SLIME"/eval/outputs_policy_r*.jsonl \
+    "$SLIME"/rollout/rollout_*.pt \
+    "$SLIME"/tensorboard_log/slime-irl \
+    "$SLIME"/tensorboard_log/slime-sft; do
+    rm -rf "$path"
+  done
+  shopt -u nullglob
+  rm -f "$SFT_BASELINE"
+}
+
+ensure_synth_sft_data
+if [ "$FROM_SCRATCH" -eq 1 ]; then
+  START_ROUND=1
+  reset_pipeline_state
+fi
 
 check_disk_space() {
   local stage=$1
@@ -198,7 +253,7 @@ round_train_complete() {
 
 round_export_complete() {
   local round=$1
-  round_output_complete "$round"
+  round_output_complete "$round" && round_external_eval_complete "$round"
 }
 
 round_output_complete() {
@@ -207,14 +262,145 @@ round_output_complete() {
   [ -f "$round_output" ] && [ "$(awk 'END {print NR}' "$round_output")" -ge "$EXPECTED_EVAL_LINES" ]
 }
 
+reward_external_eval_data_ready() {
+  [ -f "$REWARD_EXTERNAL_EVAL_PATH" ] || return 1
+  python3 - "$REWARD_EXTERNAL_EVAL_PATH" "$EXPECTED_EVAL_LINES" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = int(sys.argv[2])
+count = 0
+with path.open(encoding="utf-8") as f:
+    for line_no, line in enumerate(f, 1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not str(row.get("text", "")).strip():
+            raise SystemExit(1)
+        if not str(row.get("chosen", "")).strip():
+            raise SystemExit(1)
+        count += 1
+raise SystemExit(0 if count == expected else 1)
+PY
+}
+
+round_external_eval_path() {
+  local round=$1
+  echo "$REWARD_DIR/reward_eval_external_round_${round}.json"
+}
+
+round_reward_model_snapshot() {
+  local round=$1
+  echo "$REWARD_DIR/step_round${round}"
+}
+
+round_external_eval_complete() {
+  local round=$1
+  local eval_json
+  eval_json=$(round_external_eval_path "$round")
+  local round_output=$SLIME/eval/outputs_policy_r${round}.jsonl
+  [ -f "$eval_json" ] || return 1
+  [ -f "$round_output" ] || return 1
+  reward_external_eval_data_ready || return 1
+  python3 - "$eval_json" "$round_output" "$REWARD_EXTERNAL_EVAL_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report_path = Path(sys.argv[1])
+target_path = Path(sys.argv[2]).resolve()
+positive_path = Path(sys.argv[3]).resolve()
+
+with report_path.open(encoding="utf-8") as f:
+    data = json.load(f)
+
+
+def norm(value: str | None) -> str:
+    return str(Path(value).resolve()) if value else ""
+
+
+ok = (
+    data.get("eval_source") == "external"
+    and isinstance(data.get("matched_acc"), (int, float))
+    and data.get("total", 0) > 0
+    and norm(data.get("target_path")) == str(target_path)
+    and norm(data.get("positive_path")) == str(positive_path)
+)
+raise SystemExit(0 if ok else 1)
+PY
+}
+
+run_external_reward_eval() {
+  local round=$1
+  local round_output=$SLIME/eval/outputs_policy_r${round}.jsonl
+  local eval_json
+  eval_json=$(round_external_eval_path "$round")
+  local args_json=$REWARD_DIR/reward_eval_external_round_${round}.args.json
+  local model_path
+  model_path=$(round_reward_model_snapshot "$round")
+
+  if ! reward_external_eval_data_ready; then
+    echo "ERROR: missing external reward eval positives at $REWARD_EXTERNAL_EVAL_PATH" >&2
+    echo "ERROR: generate uf-test synthetic chosen data before running the pipeline." >&2
+    exit 1
+  fi
+  if [ ! -f "$round_output" ]; then
+    echo "ERROR: missing round output for external reward eval: $round_output" >&2
+    exit 1
+  fi
+  if [ ! -d "$model_path" ]; then
+    echo "ERROR: missing reward model snapshot for round $round at $model_path" >&2
+    exit 1
+  fi
+
+  mkdir -p "$REWARD_DIR"
+  rm -f "$eval_json" "$args_json"
+  python3 - "$args_json" "$SFT_HF_DIR" "$REWARD_DIR" "$model_path" "$REWARD_EXTERNAL_EVAL_PATH" "$round_output" "$eval_json" "$REWARD_EXTERNAL_EVAL_BATCH_SIZE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+args_path = Path(sys.argv[1])
+cfg = {
+    "hf_checkpoint": sys.argv[2],
+    "reward_model_dir": sys.argv[3],
+    "reward_model_path": sys.argv[4],
+    "reward_model_init": None,
+    "apply_chat_template": True,
+    "apply_chat_template_kwargs": {"enable_thinking": False},
+    "reward_eval_path": sys.argv[5],
+    "reward_eval_prompt_key": "text",
+    "reward_eval_chosen_key": "chosen",
+    "reward_eval_target_path": sys.argv[6],
+    "reward_eval_target_prompt_key": "prompt",
+    "reward_eval_target_answer_key": "response",
+    "reward_eval_batch_size": int(sys.argv[8]),
+    "reward_eval_output_path": sys.argv[7],
+    "reward_eval_source": "external",
+}
+args_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+PY
+
+  echo "===== Round $round: External reward eval on uf-test ====="
+  python3 -m slime.local_rm.reward_eval_cli --args-json "$args_json" --rollout-id "$round"
+  rm -f "$args_json"
+
+  if ! round_external_eval_complete "$round"; then
+    echo "ERROR: round $round external reward eval failed or is incomplete: $eval_json" >&2
+    exit 1
+  fi
+}
+
 prune_stale_checkpoints() {
   local current_round=$1
   if [ "$KEEP_ALL_ROUND_CHECKPOINTS" -eq 1 ]; then
     return 0
   fi
 
-  if ! round_output_complete "$current_round"; then
-    echo "WARNING: current round $current_round output missing or incomplete; keeping existing checkpoints"
+  if ! round_export_complete "$current_round"; then
+    echo "WARNING: current round $current_round export or external reward eval is incomplete; keeping existing checkpoints"
     return 0
   fi
 
@@ -296,7 +482,7 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   fi
   if [ "$ROUND_TRAIN_READY" -eq 1 ]; then
     echo "Skipping Round $ROUND training: found checkpoint + reward eval artifacts"
-    if [ "$ROUND_EXPORT_READY" -ne 1 ]; then
+    if ! round_output_complete "$ROUND"; then
       echo "Round $ROUND test-set output missing; exporting now"
       check_disk_space "round${ROUND}-pre-export" "$SLIME/models" "$MIN_FREE_DISK_GB_EXPORT"
       KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
@@ -304,6 +490,10 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     if ! round_output_complete "$ROUND"; then
       echo "ERROR: round $ROUND output generation failed or is incomplete: $ROUND_OUTPUT"
       exit 1
+    fi
+    if ! round_external_eval_complete "$ROUND"; then
+      echo "Round $ROUND external reward eval missing; running now"
+      run_external_reward_eval "$ROUND"
     fi
     rm -rf "$ROUND_POLICY_HF"
     if [ -d "$ROUND_SAVE_DIR" ]; then
@@ -384,6 +574,7 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     exit 1
   fi
   rm -rf "$ROUND_POLICY_HF"
+  run_external_reward_eval "$ROUND"
 
   if [ -d "$ROUND_SAVE_DIR" ]; then
     PREV_SAVE_DIR=$ROUND_SAVE_DIR
@@ -473,6 +664,8 @@ done
 echo "===== All $NUM_ROUNDS rounds completed ====="
 echo "Eval outputs:"
 ls -la $SLIME/eval/outputs_*.jsonl
+echo "External reward eval outputs:"
+ls -la $REWARD_DIR/reward_eval_external_round_*.json
 echo "Per-round test-set outputs are generated automatically under eval/."
 echo "Only the newest training checkpoint is retained by default."
 echo "Keep all round checkpoints only when needed: KEEP_ALL_ROUND_CHECKPOINTS=1"

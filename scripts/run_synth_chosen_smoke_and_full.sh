@@ -465,7 +465,7 @@ quality_report() {
   local report_path=$3
   local expected
   expected=$(wc -l < "$input_path")
-  INPUT_PATH="$input_path" OUTPUT_PATH="$output_path" REPORT_PATH="$report_path" EXPECTED_LINES="$expected" python3 - <<'PY'
+INPUT_PATH="$input_path" OUTPUT_PATH="$output_path" REPORT_PATH="$report_path" EXPECTED_LINES="$expected" python3 - <<'PY'
 import json
 import os
 import re
@@ -483,8 +483,23 @@ pat = re.compile(
     r"check (the|their) .* website|contact .* directly)",
     re.I,
 )
-input_rows = [json.loads(line) for line in inp.read_text(encoding='utf-8').splitlines() if line.strip()]
-output_rows = [json.loads(line) for line in out.read_text(encoding='utf-8').splitlines() if line.strip()] if out.exists() else []
+
+
+def load_jsonl(path: Path) -> list[dict]:
+    rows = []
+    with path.open(encoding='utf-8') as f:
+        for line_no, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"invalid jsonl: path={path} line={line_no} error={exc}") from exc
+    return rows
+
+
+input_rows = load_jsonl(inp)
+output_rows = load_jsonl(out) if out.exists() else []
 texts = [str(row.get('chosen', '')) for row in output_rows]
 empty = sum(1 for t in texts if not t.strip())
 dirty = sum(1 for t in texts if pat.search(t[:500]))
