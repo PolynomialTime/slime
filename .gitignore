@@ -206,3 +206,4 @@ tensorboard*
 eval*
 eval/*
 ultra*
+logs/*

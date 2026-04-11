@@ -7,8 +7,12 @@ SLIME=/mnt/shared-storage-gpfs2/wangqianyi2/slime
 cd $SLIME
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
-SFT_SYNTH_DATA_PATH=${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.jsonl}
+SFT_SYNTH_FULL_DATA_PATH=${SFT_SYNTH_FULL_DATA_PATH:-${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.jsonl}}
 SFT_SYNTH_REPORT_PATH=${SFT_SYNTH_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.report.json}
+SFT_WARMUP_SAMPLES=${SFT_WARMUP_SAMPLES:-10000}
+SFT_WARMUP_SEED=${SFT_WARMUP_SEED:-42}
+SFT_WARMUP_DATA_PATH=${SFT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth-warmup${SFT_WARMUP_SAMPLES}.jsonl}
+SFT_WARMUP_REPORT_PATH=${SFT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth-warmup${SFT_WARMUP_SAMPLES}.report.json}
 
 KEEP_ALL_ROUND_CHECKPOINTS=${KEEP_ALL_ROUND_CHECKPOINTS:-0}
 EVAL_TEMPERATURE=${EVAL_TEMPERATURE:-0.2}
@@ -17,10 +21,13 @@ MIN_FREE_DISK_GB_PPO=${MIN_FREE_DISK_GB_PPO:-${MIN_FREE_DISK_GB:-60}}
 MIN_FREE_DISK_GB_EXPORT=${MIN_FREE_DISK_GB_EXPORT:-${MIN_FREE_DISK_GB:-30}}
 START_ROUND=${START_ROUND:-1}
 FROM_SCRATCH=${FROM_SCRATCH:-0}
+SFT_NUM_EPOCHS=${SFT_NUM_EPOCHS:-1}
 NUM_ROUNDS=7
 NUM_ROLLOUT_PER_ROUND=150
+BOOTSTRAP_NUM_ROLLOUT=${BOOTSTRAP_NUM_ROLLOUT:-$NUM_ROLLOUT_PER_ROUND}
+BOOTSTRAP_ROLLOUT_TEMPERATURE=${BOOTSTRAP_ROLLOUT_TEMPERATURE:-0.7}
 TEST_DATA=$ULTRAFEEDBACK_DIR/uf-test.jsonl
-REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test-synth-chosen.jsonl}
+REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test-synth-prefs.jsonl}
 REWARD_EXTERNAL_EVAL_BATCH_SIZE=${REWARD_EXTERNAL_EVAL_BATCH_SIZE:-32}
 EXPECTED_EVAL_LINES=2000
 if [ -f "$TEST_DATA" ]; then
@@ -35,20 +42,19 @@ SFT_MEGATRON_DIR=$SLIME/models/sft_checkpoint
 SFT_BASELINE=$SLIME/eval/outputs_sft_baseline.jsonl
 SFT_DATA_PATH=${SFT_DATA_PATH:-}
 if [ -z "$SFT_DATA_PATH" ]; then
-  if [ -f "$SFT_SYNTH_DATA_PATH" ]; then
-    SFT_DATA_PATH=$SFT_SYNTH_DATA_PATH
+  if [ "$SFT_WARMUP_SAMPLES" -gt 0 ]; then
+    SFT_DATA_PATH=$SFT_WARMUP_DATA_PATH
+  elif [ -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
+    SFT_DATA_PATH=$SFT_SYNTH_FULL_DATA_PATH
   else
     SFT_DATA_PATH=$ULTRAFEEDBACK_DIR/uf-sft-clean.jsonl
   fi
 fi
 
-echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS SFT_DATA_PATH=$SFT_DATA_PATH EVAL_TEMPERATURE=$EVAL_TEMPERATURE MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
 
-ensure_synth_sft_data() {
-  if [ -f "$SFT_DATA_PATH" ]; then
-    return 0
-  fi
-  if [ "$SFT_DATA_PATH" != "$SFT_SYNTH_DATA_PATH" ]; then
+ensure_synth_sft_full_data() {
+  if [ -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
     return 0
   fi
   local synth_input=$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl
@@ -60,8 +66,25 @@ ensure_synth_sft_data() {
   echo "===== Building synthetic SFT clean dataset ====="
   python3 scripts/build_sft_clean_from_synth.py \
     --input "$synth_input" \
-    --output "$SFT_SYNTH_DATA_PATH" \
+    --output "$SFT_SYNTH_FULL_DATA_PATH" \
     --report "$SFT_SYNTH_REPORT_PATH"
+}
+
+ensure_sft_warmup_data() {
+  if [ "$SFT_DATA_PATH" != "$SFT_WARMUP_DATA_PATH" ]; then
+    return 0
+  fi
+  ensure_synth_sft_full_data
+  if [ -f "$SFT_WARMUP_DATA_PATH" ] && [ "$(awk 'END {print NR}' "$SFT_WARMUP_DATA_PATH")" -eq "$SFT_WARMUP_SAMPLES" ]; then
+    return 0
+  fi
+  echo "===== Building synthetic SFT warmup subset ====="
+  python3 scripts/sample_jsonl.py \
+    --input "$SFT_SYNTH_FULL_DATA_PATH" \
+    --output "$SFT_WARMUP_DATA_PATH" \
+    --count "$SFT_WARMUP_SAMPLES" \
+    --seed "$SFT_WARMUP_SEED" \
+    --report "$SFT_WARMUP_REPORT_PATH"
 }
 
 reset_pipeline_state() {
@@ -80,7 +103,10 @@ reset_pipeline_state() {
   rm -f "$SFT_BASELINE"
 }
 
-ensure_synth_sft_data
+if [ "$SFT_DATA_PATH" = "$SFT_SYNTH_FULL_DATA_PATH" ]; then
+  ensure_synth_sft_full_data
+fi
+ensure_sft_warmup_data
 if [ "$FROM_SCRATCH" -eq 1 ]; then
   START_ROUND=1
   reset_pipeline_state
@@ -108,6 +134,13 @@ check_disk_space() {
 SKIP_SFT=0
 if [ -d "$SFT_HF_DIR" ] && [ -f "$SFT_HF_DIR/config.json" ] && [ -f "$SFT_MEGATRON_DIR/latest_checkpointed_iteration.txt" ]; then
   SKIP_SFT=1
+fi
+
+RESUME_PARTIAL_ROUND1=0
+if [ "$FROM_SCRATCH" -ne 1 ] && [ "$START_ROUND" -eq 1 ] && [ "$SKIP_SFT" -eq 1 ]; then
+  if [ -d "$SLIME/rollout" ] || [ -d "$REWARD_DIR" ] || [ -d "$SLIME/models/save_dir_r1" ]; then
+    RESUME_PARTIAL_ROUND1=1
+  fi
 fi
 
 SKIP_SFT_BASELINE=0
@@ -139,20 +172,26 @@ rm -rf $SLIME/models/qwen3-1.7b-base_torch_dist
 rm -rf $SLIME/models/sft_checkpoint_hf  # old 1.7B SFT HF
 
 if [ "$START_ROUND" -eq 1 ]; then
-  if [ "$SKIP_SFT" -ne 1 ]; then
-    rm -rf $SFT_MEGATRON_DIR
-    rm -rf $SFT_HF_DIR
+  if [ "$RESUME_PARTIAL_ROUND1" -eq 1 ]; then
+    echo "Resume mode: preserving partial round-1 artifacts (reward_model, rollout, tensorboard_log, eval outputs, save_dir_r*)"
+    rm -rf $SLIME/models/policy_r*_hf
+    mkdir -p $SLIME/eval
+  else
+    if [ "$SKIP_SFT" -ne 1 ]; then
+      rm -rf $SFT_MEGATRON_DIR
+      rm -rf $SFT_HF_DIR
+    fi
+    rm -rf $SLIME/models/reward_model
+    rm -rf $SLIME/models/save_dir_r*
+    rm -rf $SLIME/models/policy_r*_hf
+    rm -rf $SLIME/rollout
+    rm -rf $SLIME/tensorboard_log
+    # Clean per-round policy outputs but preserve SFT baseline
+    find $SLIME/eval -maxdepth 1 -name "outputs_policy_r*.jsonl" -delete 2>/dev/null || true
+    find $SLIME/eval -maxdepth 1 -name "winrate_r*.json" -delete 2>/dev/null || true
+    find $SLIME/eval -maxdepth 1 -name "winrate_r*.log" -delete 2>/dev/null || true
+    mkdir -p $SLIME/eval
   fi
-  rm -rf $SLIME/models/reward_model
-  rm -rf $SLIME/models/save_dir_r*
-  rm -rf $SLIME/models/policy_r*_hf
-  rm -rf $SLIME/rollout
-  rm -rf $SLIME/tensorboard_log
-  # Clean per-round policy outputs but preserve SFT baseline
-  find $SLIME/eval -maxdepth 1 -name "outputs_policy_r*.jsonl" -delete 2>/dev/null || true
-  find $SLIME/eval -maxdepth 1 -name "winrate_r*.json" -delete 2>/dev/null || true
-  find $SLIME/eval -maxdepth 1 -name "winrate_r*.log" -delete 2>/dev/null || true
-  mkdir -p $SLIME/eval
 else
   echo "Resume mode: preserving reward_model, save_dir_r*, rollout, tensorboard_log, and eval outputs"
   rm -rf $SLIME/models/policy_r*_hf
@@ -188,6 +227,7 @@ else
   ACTOR_CKPT=$SLIME/models/qwen3-8b-base_torch_dist \
   SAVE_DIR=$SFT_MEGATRON_DIR \
   SFT_DATA=$SFT_DATA_PATH \
+  SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS \
   bash scripts/run-sft-prod.sh
 fi
 
@@ -281,6 +321,8 @@ with path.open(encoding="utf-8") as f:
             raise SystemExit(1)
         if not str(row.get("chosen", "")).strip():
             raise SystemExit(1)
+        if "rejected" not in row:
+            raise SystemExit(1)
         count += 1
 raise SystemExit(0 if count == expected else 1)
 PY
@@ -300,18 +342,15 @@ round_external_eval_complete() {
   local round=$1
   local eval_json
   eval_json=$(round_external_eval_path "$round")
-  local round_output=$SLIME/eval/outputs_policy_r${round}.jsonl
   [ -f "$eval_json" ] || return 1
-  [ -f "$round_output" ] || return 1
   reward_external_eval_data_ready || return 1
-  python3 - "$eval_json" "$round_output" "$REWARD_EXTERNAL_EVAL_PATH" <<'PY'
+  python3 - "$eval_json" "$REWARD_EXTERNAL_EVAL_PATH" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 report_path = Path(sys.argv[1])
-target_path = Path(sys.argv[2]).resolve()
-positive_path = Path(sys.argv[3]).resolve()
+positive_path = Path(sys.argv[2]).resolve()
 
 with report_path.open(encoding="utf-8") as f:
     data = json.load(f)
@@ -325,8 +364,8 @@ ok = (
     data.get("eval_source") == "external"
     and isinstance(data.get("matched_acc"), (int, float))
     and data.get("total", 0) > 0
-    and norm(data.get("target_path")) == str(target_path)
     and norm(data.get("positive_path")) == str(positive_path)
+    and norm(data.get("target_path")) == str(positive_path)
 )
 raise SystemExit(0 if ok else 1)
 PY
@@ -334,7 +373,6 @@ PY
 
 run_external_reward_eval() {
   local round=$1
-  local round_output=$SLIME/eval/outputs_policy_r${round}.jsonl
   local eval_json
   eval_json=$(round_external_eval_path "$round")
   local args_json=$REWARD_DIR/reward_eval_external_round_${round}.args.json
@@ -343,11 +381,7 @@ run_external_reward_eval() {
 
   if ! reward_external_eval_data_ready; then
     echo "ERROR: missing external reward eval positives at $REWARD_EXTERNAL_EVAL_PATH" >&2
-    echo "ERROR: generate uf-test synthetic chosen data before running the pipeline." >&2
-    exit 1
-  fi
-  if [ ! -f "$round_output" ]; then
-    echo "ERROR: missing round output for external reward eval: $round_output" >&2
+    echo "ERROR: generate uf-test synthetic prefs data before running the pipeline." >&2
     exit 1
   fi
   if [ ! -d "$model_path" ]; then
@@ -357,7 +391,7 @@ run_external_reward_eval() {
 
   mkdir -p "$REWARD_DIR"
   rm -f "$eval_json" "$args_json"
-  python3 - "$args_json" "$SFT_HF_DIR" "$REWARD_DIR" "$model_path" "$REWARD_EXTERNAL_EVAL_PATH" "$round_output" "$eval_json" "$REWARD_EXTERNAL_EVAL_BATCH_SIZE" <<'PY'
+  python3 - "$args_json" "$SFT_HF_DIR" "$REWARD_DIR" "$model_path" "$REWARD_EXTERNAL_EVAL_PATH" "$eval_json" "$REWARD_EXTERNAL_EVAL_BATCH_SIZE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -373,11 +407,10 @@ cfg = {
     "reward_eval_path": sys.argv[5],
     "reward_eval_prompt_key": "text",
     "reward_eval_chosen_key": "chosen",
-    "reward_eval_target_path": sys.argv[6],
-    "reward_eval_target_prompt_key": "prompt",
-    "reward_eval_target_answer_key": "response",
-    "reward_eval_batch_size": int(sys.argv[8]),
-    "reward_eval_output_path": sys.argv[7],
+    "reward_eval_rejected_key": "rejected",
+    "reward_eval_target_path": "",
+    "reward_eval_batch_size": int(sys.argv[7]),
+    "reward_eval_output_path": sys.argv[6],
     "reward_eval_source": "external",
 }
 args_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -415,6 +448,19 @@ prune_stale_checkpoints() {
     echo "Pruning obsolete checkpoint $save_dir after successful export for round $current_round"
     rm -rf "$save_dir"
   done
+
+  for reward_step_dir in "$REWARD_DIR"/step_round*; do
+    if [ ! -d "$reward_step_dir" ]; then
+      continue
+    fi
+    echo "Pruning reward snapshot $reward_step_dir after successful external eval for round $current_round"
+    rm -rf "$reward_step_dir"
+  done
+
+  if [ "$current_round" -ge 1 ] && [ -d "$SFT_MEGATRON_DIR" ]; then
+    echo "Pruning SFT Megatron checkpoint $SFT_MEGATRON_DIR after round $current_round export completed"
+    rm -rf "$SFT_MEGATRON_DIR"
+  fi
 }
 
 # ============ Generate SFT baseline outputs (for offline winrate comparison) ============
@@ -429,7 +475,7 @@ fi
 # Round 0: Bootstrap rollout — collect SFT-aligned rollouts so R1 can train RM
 echo "===== Round 0: Bootstrap rollout (SFT-aligned rollouts for R1 reward update) ====="
 BOOTSTRAP_SAVE_DIR=$SLIME/models/save_dir_bootstrap
-if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null | wc -l)" -lt 50 ]; then
+if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null | wc -l)" -lt "$BOOTSTRAP_NUM_ROLLOUT" ]; then
   rm -rf $BOOTSTRAP_SAVE_DIR /tmp/critic_ckpt 2>/dev/null || true
 
   MODEL_SH=scripts/models/qwen3-8B.sh \
@@ -438,10 +484,10 @@ if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null 
   SAVE_DIR=$BOOTSTRAP_SAVE_DIR \
   PROMPT_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   DEMO_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
-  NUM_ROLLOUT=50 \
+  NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT \
   ALIGN_ROLLOUT_WITH_SFT=1 \
   DEBUG_ROLLOUT_ONLY=1 \
-  ROLLOUT_TEMPERATURE=0 \
+  ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE \
   TB_EXP_NAME=bootstrap \
   bash scripts/run-irl-prod.sh
 
@@ -508,8 +554,8 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     echo "Skipping Round $ROUND reward update: found $ROUND_REWARD_EVAL"
   else
     if [ "$ROUND" -eq 1 ]; then
-      RU_ROLLOUT_END=49
-      RU_NUM_ROLLOUT=50
+      RU_ROLLOUT_END=$(( BOOTSTRAP_NUM_ROLLOUT - 1 ))
+      RU_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT
     else
       RU_ROLLOUT_END=$(( NUM_ROLLOUT_PER_ROUND - 1 ))
       RU_NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND
@@ -521,6 +567,10 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     ROUND_ID=$ROUND \
     ROLLOUT_END=$RU_ROLLOUT_END \
     NUM_ROLLOUT_PER_ROUND=$RU_NUM_ROLLOUT \
+    REWARD_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH \
+    REWARD_EVAL_REJECTED_KEY=rejected \
+    REWARD_EVAL_TARGET_PATH= \
+    REWARD_EVAL_BATCH_SIZE=$REWARD_EXTERNAL_EVAL_BATCH_SIZE \
     bash scripts/run-reward-update.sh
   fi
 

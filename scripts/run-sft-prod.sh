@@ -59,7 +59,7 @@ SFT_ARGS=(
    --prompt-data ${SFT_DATA}
    --input-key messages
    --rollout-shuffle
-   --num-epoch 2
+   --num-epoch ${SFT_NUM_EPOCHS:-2}
    --rollout-batch-size 64
    --global-batch-size 64
 
@@ -127,7 +127,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train_async.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 2 \
+   --actor-num-gpus-per-node 8 \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${SFT_ARGS[@]} \

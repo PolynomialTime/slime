@@ -8,6 +8,9 @@ EVAL_DIR=${EVAL_DIR:-$SLIME_ROOT/eval}
 WINRATE_OUTPUT_DIR=${WINRATE_OUTPUT_DIR:-$SLIME_ROOT/eval_winrate}
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME_ROOT/ultrafeedback}
 TEST_DATA=${TEST_DATA:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}
+WINRATE_REFERENCE_DATA=${WINRATE_REFERENCE_DATA:-$ULTRAFEEDBACK_DIR/uf-test-synth-prefs.jsonl}
+WINRATE_REFERENCE_KEY=${WINRATE_REFERENCE_KEY:-chosen}
+WINRATE_REFERENCE_PROMPT_KEY=${WINRATE_REFERENCE_PROMPT_KEY:-text}
 SFT_BASELINE=${SFT_BASELINE:-$EVAL_DIR/outputs_sft_baseline.jsonl}
 WINRATE_MODEL=${WINRATE_MODEL:-gpt-4o}
 WINRATE_API_KEY=${WINRATE_API_KEY:-${OPENAI_API_KEY:-${OPENROUTER_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}}}
@@ -70,7 +73,8 @@ Options:
   --help                Show this message.
 
 Environment overrides:
-  SLIME_ROOT, EVAL_DIR, WINRATE_OUTPUT_DIR, TEST_DATA, SFT_BASELINE,
+  SLIME_ROOT, EVAL_DIR, WINRATE_OUTPUT_DIR, TEST_DATA, WINRATE_REFERENCE_DATA,
+  WINRATE_REFERENCE_KEY, WINRATE_REFERENCE_PROMPT_KEY, SFT_BASELINE,
   WINRATE_MODEL, WINRATE_API_KEY, WINRATE_BASE_URL, OPENAI_API_KEY,
   WINRATE_FALLBACK_MODEL, WINRATE_FALLBACK_API_KEY, WINRATE_FALLBACK_BASE_URL,
   OPENROUTER_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_BASE_URL, ANTHROPIC_BASE_URL.
@@ -199,15 +203,14 @@ PY
 
 winrate_json_is_current() {
   local path=$1
-  local outputs_a=$2
-  local outputs_b=$3
+  shift
   winrate_json_is_complete "$path" || return 1
-  python3 - "$path" "$outputs_a" "$outputs_b" <<'PY'
+  python3 - "$path" "$@" <<'PY'
 from pathlib import Path
 import sys
 
 winrate_path = Path(sys.argv[1])
-deps = [Path(sys.argv[2]), Path(sys.argv[3])]
+deps = [Path(p) for p in sys.argv[2:]]
 try:
     winrate_mtime = winrate_path.stat().st_mtime
     dep_mtime = max(dep.stat().st_mtime for dep in deps)
@@ -224,9 +227,17 @@ print_winrate_summary() {
 import json, sys
 path, label = sys.argv[1], sys.argv[2]
 data = json.load(open(path, encoding="utf-8"))
+mode = data.get("mode", "blind")
+judge_counts = data.get("judge_source_counts") or {}
+extra = ""
+if mode == "reference":
+    extra = (
+        f" fast_path={judge_counts.get('fast_path', data.get('fast_path_count', 0))}"
+        f" model={judge_counts.get('model', data.get('model_judge_count', 0))}"
+    )
 print(
-    f"{label}: winrate_a={data['winrate_a']:.4f} "
-    f"a_wins={data['a_wins']} b_wins={data['b_wins']} ties={data['ties']} total={data['total']}"
+    f"{label}: mode={mode} winrate_a={data['winrate_a']:.4f} "
+    f"a_wins={data['a_wins']} b_wins={data['b_wins']} ties={data['ties']} total={data['total']}{extra}"
 )
 PY
 }
@@ -251,10 +262,17 @@ run_winrate_eval() {
   local outputs_b=$2
   local output_json=$3
   local label=$4
+  local mode=${5:-blind}
   local output_log="${output_json%.json}.log"
   local -a cmd
+  local -a freshness_deps
 
-  if winrate_json_is_current "$output_json" "$outputs_a" "$outputs_b"; then
+  freshness_deps=("$outputs_a" "$outputs_b")
+  if [ "$mode" = "reference" ]; then
+    freshness_deps+=("$WINRATE_REFERENCE_DATA")
+  fi
+
+  if winrate_json_is_current "$output_json" "${freshness_deps[@]}"; then
     echo "Skipping ${label}: found current $output_json"
     print_winrate_summary "$output_json" "$label"
     return 0
@@ -269,10 +287,16 @@ run_winrate_eval() {
     --outputs-a "$outputs_a"
     --outputs-b "$outputs_b"
     --output "$output_json"
+    --mode "$mode"
     --api-key "$WINRATE_API_KEY"
     --model "$WINRATE_MODEL"
     --concurrency "$CONCURRENCY"
   )
+  if [ "$mode" = "reference" ]; then
+    cmd+=(--reference "$WINRATE_REFERENCE_DATA")
+    cmd+=(--reference-key "$WINRATE_REFERENCE_KEY")
+    cmd+=(--reference-prompt-key "$WINRATE_REFERENCE_PROMPT_KEY")
+  fi
   if [ -n "$WINRATE_BASE_URL" ]; then
     cmd+=(--base-url "$WINRATE_BASE_URL")
   fi
@@ -304,6 +328,7 @@ scan_once() {
   local evaluated=0
   local pending=0
   local baseline_lines
+  local reference_lines=0
 
   echo "===== Winrate scan $(date '+%F %T') ====="
 
@@ -319,9 +344,14 @@ scan_once() {
     return 0
   fi
 
+  if [ -f "$WINRATE_REFERENCE_DATA" ]; then
+    reference_lines=$(awk 'END {print NR}' "$WINRATE_REFERENCE_DATA")
+  fi
+
   for round in "${ROUNDS[@]}"; do
     local round_output="$EVAL_DIR/outputs_policy_r${round}.jsonl"
     local round_winrate_sft="$WINRATE_OUTPUT_DIR/winrate_r${round}_vs_sft.json"
+    local round_winrate_ref_synth="$WINRATE_OUTPUT_DIR/winrate_ref_synth_r${round}_vs_sft.json"
     local line_count=0
 
     if [ -f "$round_output" ]; then
@@ -343,7 +373,21 @@ scan_once() {
       "$round_output" \
       "$SFT_BASELINE" \
       "$round_winrate_sft" \
-      "Round $round winrate vs SFT"
+      "Round $round blind winrate vs SFT" \
+      blind
+
+    if [ "$reference_lines" -lt "$EXPECTED_EVAL_LINES" ]; then
+      echo "Round $round pending: reference data has only $reference_lines/$EXPECTED_EVAL_LINES lines in $WINRATE_REFERENCE_DATA"
+      pending=1
+      continue
+    fi
+
+    run_winrate_eval \
+      "$round_output" \
+      "$SFT_BASELINE" \
+      "$round_winrate_ref_synth" \
+      "Round $round synth-reference winrate vs SFT" \
+      reference
 
     evaluated=$((evaluated + 1))
   done
@@ -359,6 +403,9 @@ echo "SLIME_ROOT=$SLIME_ROOT"
 echo "EVAL_DIR=$EVAL_DIR"
 echo "WINRATE_OUTPUT_DIR=$WINRATE_OUTPUT_DIR"
 echo "SFT_BASELINE=$SFT_BASELINE"
+echo "WINRATE_REFERENCE_DATA=$WINRATE_REFERENCE_DATA"
+echo "WINRATE_REFERENCE_KEY=$WINRATE_REFERENCE_KEY"
+echo "WINRATE_REFERENCE_PROMPT_KEY=$WINRATE_REFERENCE_PROMPT_KEY"
 echo "ROUNDS=${ROUNDS[*]}"
 echo "EXPECTED_EVAL_LINES=$EXPECTED_EVAL_LINES"
 echo "WINRATE_MODEL=$WINRATE_MODEL"

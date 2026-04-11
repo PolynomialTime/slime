@@ -10,6 +10,14 @@ from tqdm import tqdm
 from .data import load_prompt_answer_samples
 from .model import get_sequence_rewards, init_reward_model, load_tokenizer
 
+try:
+    from torch.utils.tensorboard import SummaryWriter
+
+    _HAS_TB = True
+except ImportError:
+    SummaryWriter = None
+    _HAS_TB = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,11 +30,25 @@ def _build_prompt_index(samples):
     return prompt_to_samples
 
 
+def _reward_tb_dir(reward_dir: Path, rollout_id: int) -> Path:
+    slime_root = reward_dir.parents[1] if len(reward_dir.parents) >= 2 else reward_dir.parent
+    round_id = os.environ.get("ROUND_ID", str(rollout_id))
+    return slime_root / "tensorboard_log" / "slime-reward" / f"round{round_id}"
+
+
+def _tb_eval_prefix(source: str | None) -> str:
+    value = (source or "external").strip().lower()
+    if value == "external":
+        return "external_test"
+    return value.replace("-", "_")
+
+
 def reward_eval(args, rollout_id: int) -> None:
     eval_path = getattr(args, "reward_eval_path", None) or getattr(args, "reward_demo_path", None)
     target_path = getattr(args, "reward_eval_target_path", None)
-    if not eval_path or not target_path:
-        logger.info("reward_eval: reward_eval_path/target_path not fully set, skipping")
+    rejected_key = getattr(args, "reward_eval_rejected_key", None)
+    if not eval_path or (not target_path and not rejected_key):
+        logger.info("reward_eval: external eval data not fully set, skipping")
         return
 
     reward_dir = Path(args.reward_model_dir)
@@ -45,10 +67,11 @@ def reward_eval(args, rollout_id: int) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
+    eval_prompt_key = getattr(args, "reward_eval_prompt_key", None) or getattr(args, "reward_demo_prompt_key", "text")
     positive_samples = load_prompt_answer_samples(
         eval_path,
         tokenizer=tokenizer,
-        prompt_key=getattr(args, "reward_eval_prompt_key", None) or getattr(args, "reward_demo_prompt_key", "text"),
+        prompt_key=eval_prompt_key,
         answer_key=getattr(args, "reward_eval_chosen_key", "chosen"),
         apply_chat_template=args.apply_chat_template,
         apply_chat_template_kwargs=args.apply_chat_template_kwargs,
@@ -57,14 +80,24 @@ def reward_eval(args, rollout_id: int) -> None:
     if max_samples is not None:
         positive_samples = positive_samples[:max_samples]
 
-    target_samples = load_prompt_answer_samples(
-        target_path,
-        tokenizer=tokenizer,
-        prompt_key=getattr(args, "reward_eval_target_prompt_key", "prompt"),
-        answer_key=getattr(args, "reward_eval_target_answer_key", "response"),
-        apply_chat_template=args.apply_chat_template,
-        apply_chat_template_kwargs=args.apply_chat_template_kwargs,
-    )
+    if target_path:
+        target_samples = load_prompt_answer_samples(
+            target_path,
+            tokenizer=tokenizer,
+            prompt_key=getattr(args, "reward_eval_target_prompt_key", "prompt"),
+            answer_key=getattr(args, "reward_eval_target_answer_key", "response"),
+            apply_chat_template=args.apply_chat_template,
+            apply_chat_template_kwargs=args.apply_chat_template_kwargs,
+        )
+    else:
+        target_samples = load_prompt_answer_samples(
+            eval_path,
+            tokenizer=tokenizer,
+            prompt_key=eval_prompt_key,
+            answer_key=rejected_key,
+            apply_chat_template=args.apply_chat_template,
+            apply_chat_template_kwargs=args.apply_chat_template_kwargs,
+        )
     target_index = _build_prompt_index(target_samples)
 
     positive_tokens: list[list[int]] = []
@@ -140,9 +173,21 @@ def reward_eval(args, rollout_id: int) -> None:
                 "missing": missing,
                 "model_path": str(model_path),
                 "positive_path": eval_path,
-                "target_path": target_path,
+                "target_path": target_path or eval_path,
             },
             f,
             indent=2,
         )
+    if _HAS_TB:
+        tb_dir = _reward_tb_dir(reward_dir, rollout_id)
+        tb_dir.mkdir(parents=True, exist_ok=True)
+        tb_writer = SummaryWriter(str(tb_dir))
+        eval_prefix = _tb_eval_prefix(eval_source)
+        tb_writer.add_scalar(f"reward/{eval_prefix}_acc", acc, rollout_id)
+        tb_writer.add_scalar(f"reward/{eval_prefix}_matched_margin", margin, rollout_id)
+        tb_writer.add_scalar(f"reward/{eval_prefix}_missing", missing, rollout_id)
+        tb_writer.add_scalar(f"reward/{eval_prefix}_matched_pairs", total, rollout_id)
+        tb_writer.flush()
+        tb_writer.close()
+        logger.info("reward_eval: wrote tensorboard scalars to %s", tb_dir)
     logger.info("reward_eval: saved results to %s", out_path)

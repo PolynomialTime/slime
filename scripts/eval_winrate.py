@@ -7,6 +7,8 @@ Usage:
         --outputs-a /path/to/outputs_irl.jsonl \
         --outputs-b /path/to/outputs_base.jsonl \
         --output /path/to/winrate.json \
+        [--mode blind|reference] \
+        [--reference /path/to/reference.jsonl] \
         [--api-key sk-...] \
         [--model gpt-4o] \
         [--max-samples 100]
@@ -59,7 +61,7 @@ JUDGE_SYSTEM = (
     "Do not include any explanation, reasoning, punctuation, or extra words."
 )
 
-JUDGE_PROMPT = """You are evaluating two AI assistant responses to the same conversation.
+BLIND_JUDGE_PROMPT = """You are evaluating two AI assistant responses to the same conversation.
 
 Conversation:
 {prompt}
@@ -79,19 +81,51 @@ Rules:
 
 Answer:"""
 
+REFERENCE_JUDGE_PROMPT = """You are evaluating two AI assistant responses to the same conversation using a reference answer.
+
+Conversation:
+{prompt}
+
+Reference Answer:
+{reference}
+
+Response A:
+{response_a}
+
+Response B:
+{response_b}
+
+Which response better matches the reference answer's task completion, correctness, and required answer form?
+
+Rules:
+- Prefer the response that is more faithful to the reference answer's correctness, constraints, and answer form.
+- Do not reward extra verbosity, generic helpfulness, hedging, or added explanation unless it clearly improves fidelity to the reference answer.
+- If the task expects a constrained answer form (for example Yes/No, True/False, a multiple-choice option, a numbered option, or a short label), prefer the response that follows that form more faithfully.
+- If one response is longer but drifts away from the reference answer's format or intent, prefer the shorter on-target response.
+- Return exactly one token: A, B, or Tie
+- Do not explain your answer
+- Do not output any other text
+
+Answer:"""
+
+FAST_PATH_STOP_MARKERS = (
+    "\n",
+    "stream of consciousness:",
+    "reasoning:",
+    "analysis:",
+    "explanation:",
+)
+
 
 async def judge_pair(
     client: AsyncOpenAI,
     model: str,
-    prompt: str,
-    response_a: str,
-    response_b: str,
+    content: str,
     semaphore: asyncio.Semaphore,
     fallback_client: AsyncOpenAI | None = None,
     fallback_model: str | None = None,
 ) -> tuple[str, str, bool]:
     """Returns (parsed_verdict, raw_verdict_text, is_parse_error)."""
-    content = JUDGE_PROMPT.format(prompt=prompt, response_a=response_a, response_b=response_b)
     async with semaphore:
         active_client = client
         active_model = model
@@ -172,7 +206,7 @@ async def judge_pair(
                 await asyncio.sleep(delay_s)
 
 
-def load_outputs(path: str) -> list[dict]:
+def load_jsonl(path: str) -> list[dict]:
     rows = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -182,23 +216,149 @@ def load_outputs(path: str) -> list[dict]:
     return rows
 
 
-async def run(args):
-    rows_a = load_outputs(args.outputs_a)
-    rows_b = load_outputs(args.outputs_b)
+def normalize_space(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
 
-    if len(rows_a) != len(rows_b):
-        raise ValueError(
-            f"Length mismatch: outputs-a has {len(rows_a)} rows, outputs-b has {len(rows_b)}"
-        )
 
-    n = len(rows_a)
-    if args.max_samples and n > args.max_samples:
-        rows_a = rows_a[: args.max_samples]
-        rows_b = rows_b[: args.max_samples]
-        n = args.max_samples
+def get_required_str(row: dict, key: str, path: str, index: int) -> str:
+    if key not in row:
+        raise KeyError(f"Missing key {key!r} in {path} at row {index}")
+    value = row[key]
+    if value is None:
+        return ""
+    return str(value)
 
-    logger.info("Evaluating %d pairs with model=%s", n, args.model)
 
+def build_blind_prompt(prompt: str, response_a: str, response_b: str) -> str:
+    return BLIND_JUDGE_PROMPT.format(prompt=prompt, response_a=response_a, response_b=response_b)
+
+
+def build_reference_prompt(prompt: str, reference: str, response_a: str, response_b: str) -> str:
+    return REFERENCE_JUDGE_PROMPT.format(
+        prompt=prompt,
+        reference=reference,
+        response_a=response_a,
+        response_b=response_b,
+    )
+
+
+def leading_answer_segment(text: str) -> str:
+    segment = str(text or "").strip()
+    lowered = segment.lower()
+    cut = len(segment)
+    for marker in FAST_PATH_STOP_MARKERS:
+        idx = lowered.find(marker)
+        if idx != -1 and idx < cut:
+            cut = idx
+    segment = segment[:cut].strip()
+    if not segment:
+        return ""
+    first_line = segment.splitlines()[0].strip()
+    return normalize_space(first_line)
+
+
+def extract_constraint_signature(text: str) -> tuple[str, str] | None:
+    segment = leading_answer_segment(text)
+    if not segment:
+        return None
+
+    upper = segment.upper()
+    lower = segment.lower()
+
+    bool_match = re.match(r"^(yes|no|true|false)\b", lower)
+    if bool_match:
+        return ("bool", bool_match.group(1))
+
+    letter_patterns = (
+        r"^\(\s*([A-H])\s*\)",
+        r"^(?:OPTION\s+)?([A-H])(?=\s*[\).:\-]|(?:\s+\d)|\s*$)",
+    )
+    for pattern in letter_patterns:
+        match = re.match(pattern, upper)
+        if match:
+            return ("letter", match.group(1))
+
+    number_patterns = (
+        r"^\(\s*(\d{1,3})\s*\)",
+        r"^(?:OPTION\s+)?(\d{1,3})(?=\s*[\).:\-]|\s*$)",
+    )
+    for pattern in number_patterns:
+        match = re.match(pattern, upper)
+        if match:
+            return ("number", match.group(1))
+
+    if (
+        len(segment) <= 40
+        and not re.search(r"[.!?;,]", segment)
+        and 1 <= len(segment.split()) <= 4
+    ):
+        return ("short_label", lower)
+
+    return None
+
+
+def signature_matches(text: str, signature: tuple[str, str]) -> bool:
+    candidate = extract_constraint_signature(text)
+    return candidate == signature
+
+
+def maybe_fast_path_winner(
+    prompt: str,
+    response_a: str,
+    response_b: str,
+    reference: str,
+    enabled: bool,
+) -> dict | None:
+    if not enabled:
+        return None
+
+    signature = extract_constraint_signature(reference)
+    if signature is None:
+        return None
+
+    match_a = signature_matches(response_a, signature)
+    match_b = signature_matches(response_b, signature)
+    if match_a == match_b:
+        return None
+
+    winner = "a" if match_a else "b"
+    verdict = "A" if winner == "a" else "B"
+    return {
+        "prompt": prompt,
+        "response_a": response_a,
+        "response_b": response_b,
+        "reference": reference,
+        "swapped": False,
+        "verdict": verdict,
+        "raw_verdict": f"FAST_PATH:{verdict}",
+        "parse_error": False,
+        "winner": winner,
+        "judge_source": "fast_path",
+        "fast_path_signature": {"type": signature[0], "value": signature[1]},
+    }
+
+
+def validate_pair_alignment(
+    rows_a: list[dict],
+    rows_b: list[dict],
+    rows_ref: list[dict] | None,
+    reference_path: str | None,
+    reference_prompt_key: str,
+) -> None:
+    for i, (row_a, row_b) in enumerate(zip(rows_a, rows_b)):
+        prompt_a = normalize_space(get_required_str(row_a, "prompt", "outputs_a", i))
+        prompt_b = normalize_space(get_required_str(row_b, "prompt", "outputs_b", i))
+        if prompt_a != prompt_b:
+            raise ValueError(f"Prompt mismatch between outputs-a and outputs-b at row {i}")
+        if rows_ref is not None and reference_path is not None:
+            prompt_ref = normalize_space(get_required_str(rows_ref[i], reference_prompt_key, reference_path, i))
+            if prompt_a != prompt_ref:
+                raise ValueError(
+                    f"Prompt mismatch between outputs and reference at row {i}: {reference_path}"
+                )
+
+
+def init_clients(args) -> tuple[AsyncOpenAI, AsyncOpenAI | None]:
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise ValueError("Provide --api-key or set OPENAI_API_KEY/OPENROUTER_API_KEY env var")
@@ -222,56 +382,156 @@ async def run(args):
             api_key=fallback_api_key,
             **({"base_url": fallback_base_url} if fallback_base_url else {}),
         )
-    semaphore = asyncio.Semaphore(args.concurrency)
+    return client, fallback_client
 
-    async def eval_one(i):
-        prompt = rows_a[i]["prompt"]
-        resp_a = rows_a[i]["response"]
-        resp_b = rows_b[i]["response"]
 
-        swap = random.random() < 0.5
-        if swap:
-            judge_a, judge_b = resp_b, resp_a
-        else:
-            judge_a, judge_b = resp_a, resp_b
+def build_model_job(
+    index: int,
+    prompt: str,
+    response_a: str,
+    response_b: str,
+    reference: str | None,
+    mode: str,
+) -> dict:
+    swap = random.random() < 0.5
+    judge_a, judge_b = (response_b, response_a) if swap else (response_a, response_b)
+    if mode == "reference":
+        content = build_reference_prompt(prompt, reference or "", judge_a, judge_b)
+    else:
+        content = build_blind_prompt(prompt, judge_a, judge_b)
+    return {
+        "index": index,
+        "prompt": prompt,
+        "response_a": response_a,
+        "response_b": response_b,
+        "reference": reference,
+        "swapped": swap,
+        "content": content,
+    }
 
-        verdict, raw_verdict, parse_error = await judge_pair(
-            client,
-            args.model,
-            prompt,
-            judge_a,
-            judge_b,
-            semaphore,
-            fallback_client=fallback_client,
-            fallback_model=fallback_model,
+
+async def run(args):
+    rows_a = load_jsonl(args.outputs_a)
+    rows_b = load_jsonl(args.outputs_b)
+
+    if len(rows_a) != len(rows_b):
+        raise ValueError(
+            f"Length mismatch: outputs-a has {len(rows_a)} rows, outputs-b has {len(rows_b)}"
         )
 
-        if verdict == "Tie":
-            winner = "tie"
-        elif swap:
-            winner = "b" if verdict == "A" else "a"
-        else:
-            winner = "a" if verdict == "A" else "b"
+    rows_ref = None
+    if args.mode == "reference":
+        if not args.reference:
+            raise ValueError("--reference is required when --mode=reference")
+        rows_ref = load_jsonl(args.reference)
+        if len(rows_ref) != len(rows_a):
+            raise ValueError(
+                f"Length mismatch: reference has {len(rows_ref)} rows while outputs have {len(rows_a)} rows"
+            )
 
-        return {
-            "index": i,
-            "prompt": prompt[:200],
-            "response_a": resp_a[:200],
-            "response_b": resp_b[:200],
-            "swapped": swap,
-            "verdict": verdict,
-            "raw_verdict": raw_verdict,
-            "parse_error": parse_error,
-            "winner": winner,
-        }
+    n = len(rows_a)
+    if args.max_samples and n > args.max_samples:
+        rows_a = rows_a[: args.max_samples]
+        rows_b = rows_b[: args.max_samples]
+        if rows_ref is not None:
+            rows_ref = rows_ref[: args.max_samples]
+        n = args.max_samples
 
-    tasks = [eval_one(i) for i in range(n)]
-    results = await async_tqdm.gather(*tasks, desc="judging")
+    validate_pair_alignment(
+        rows_a,
+        rows_b,
+        rows_ref,
+        args.reference,
+        args.reference_prompt_key,
+    )
+    logger.info("Evaluating %d pairs with mode=%s model=%s", n, args.mode, args.model)
+
+    results_by_index: dict[int, dict] = {}
+    model_jobs = []
+    for i in range(n):
+        prompt = get_required_str(rows_a[i], "prompt", args.outputs_a, i)
+        resp_a = get_required_str(rows_a[i], "response", args.outputs_a, i)
+        resp_b = get_required_str(rows_b[i], "response", args.outputs_b, i)
+        reference = None
+        if rows_ref is not None:
+            reference = get_required_str(rows_ref[i], args.reference_key, args.reference, i)
+            fast_result = maybe_fast_path_winner(
+                prompt=prompt,
+                response_a=resp_a,
+                response_b=resp_b,
+                reference=reference,
+                enabled=not args.disable_fast_path,
+            )
+            if fast_result is not None:
+                fast_result["index"] = i
+                results_by_index[i] = {
+                    "index": i,
+                    "prompt": prompt[:200],
+                    "response_a": resp_a[:200],
+                    "response_b": resp_b[:200],
+                    "reference": reference[:200],
+                    "swapped": fast_result["swapped"],
+                    "verdict": fast_result["verdict"],
+                    "raw_verdict": fast_result["raw_verdict"],
+                    "parse_error": fast_result["parse_error"],
+                    "winner": fast_result["winner"],
+                    "judge_source": fast_result["judge_source"],
+                    "fast_path_signature": fast_result["fast_path_signature"],
+                }
+                continue
+
+        model_jobs.append(build_model_job(i, prompt, resp_a, resp_b, reference, args.mode))
+
+    if model_jobs:
+        client, fallback_client = init_clients(args)
+        semaphore = asyncio.Semaphore(args.concurrency)
+        fallback_model = args.fallback_model or os.environ.get("WINRATE_FALLBACK_MODEL") or None
+
+        async def eval_one(job: dict) -> dict:
+            verdict, raw_verdict, parse_error = await judge_pair(
+                client,
+                args.model,
+                job["content"],
+                semaphore,
+                fallback_client=fallback_client,
+                fallback_model=fallback_model,
+            )
+
+            if verdict == "Tie":
+                winner = "tie"
+            elif job["swapped"]:
+                winner = "b" if verdict == "A" else "a"
+            else:
+                winner = "a" if verdict == "A" else "b"
+
+            sample = {
+                "index": job["index"],
+                "prompt": job["prompt"][:200],
+                "response_a": job["response_a"][:200],
+                "response_b": job["response_b"][:200],
+                "swapped": job["swapped"],
+                "verdict": verdict,
+                "raw_verdict": raw_verdict,
+                "parse_error": parse_error,
+                "winner": winner,
+                "judge_source": "model",
+            }
+            if job["reference"] is not None:
+                sample["reference"] = job["reference"][:200]
+            return sample
+
+        model_results = await async_tqdm.gather(*(eval_one(job) for job in model_jobs), desc="judging")
+        for sample in model_results:
+            results_by_index[sample["index"]] = sample
+
+    results = [results_by_index[i] for i in range(n)]
 
     a_wins = sum(1 for r in results if r["winner"] == "a")
     b_wins = sum(1 for r in results if r["winner"] == "b")
     ties = sum(1 for r in results if r["winner"] == "tie")
     parse_errors = sum(1 for r in results if r["parse_error"])
+    fast_path_count = sum(1 for r in results if r["judge_source"] == "fast_path")
+    model_judge_count = sum(1 for r in results if r["judge_source"] == "model")
     total = len(results)
     winrate_a = (a_wins + 0.5 * ties) / total if total > 0 else 0.0
 
@@ -282,9 +542,19 @@ async def run(args):
         "ties": ties,
         "parse_errors": parse_errors,
         "winrate_a": winrate_a,
+        "mode": args.mode,
         "model": args.model,
         "outputs_a": args.outputs_a,
         "outputs_b": args.outputs_b,
+        "reference_path": args.reference if args.mode == "reference" else None,
+        "reference_key": args.reference_key if args.mode == "reference" else None,
+        "reference_prompt_key": args.reference_prompt_key if args.mode == "reference" else None,
+        "fast_path_count": fast_path_count,
+        "model_judge_count": model_judge_count,
+        "judge_source_counts": {
+            "fast_path": fast_path_count,
+            "model": model_judge_count,
+        },
         "samples": results,
     }
 
@@ -292,8 +562,15 @@ async def run(args):
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
     logger.info(
-        "Done: total=%d a_wins=%d b_wins=%d ties=%d winrate_a=%.4f",
-        total, a_wins, b_wins, ties, winrate_a,
+        "Done: mode=%s total=%d a_wins=%d b_wins=%d ties=%d winrate_a=%.4f fast_path=%d model=%d",
+        args.mode,
+        total,
+        a_wins,
+        b_wins,
+        ties,
+        winrate_a,
+        fast_path_count,
+        model_judge_count,
     )
     logger.info("Results saved to %s", args.output)
 
@@ -303,6 +580,19 @@ def main():
     parser.add_argument("--outputs-a", required=True, help="JSONL from model A")
     parser.add_argument("--outputs-b", required=True, help="JSONL from model B")
     parser.add_argument("--output", required=True, help="Output winrate JSON path")
+    parser.add_argument("--mode", choices=["blind", "reference"], default="blind")
+    parser.add_argument("--reference", default=None, help="Reference JSONL for reference-mode judging")
+    parser.add_argument("--reference-key", default="chosen", help="Reference answer key in --reference")
+    parser.add_argument(
+        "--reference-prompt-key",
+        default="text",
+        help="Prompt key in --reference used for strict row alignment",
+    )
+    parser.add_argument(
+        "--disable-fast-path",
+        action="store_true",
+        help="Disable constrained-answer fast-path in reference mode",
+    )
     parser.add_argument("--api-key", default=None, help="OpenAI/OpenRouter API key")
     parser.add_argument("--base-url", default=None, help="API base URL (e.g. https://openrouter.ai/api/v1)")
     parser.add_argument("--model", default="gpt-4o")

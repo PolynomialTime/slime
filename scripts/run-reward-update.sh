@@ -9,6 +9,14 @@ pkill -9 ray || true
 pkill -9 python || true
 sleep 3
 
+REWARD_DIR=${REWARD_DIR:-/mnt/shared-storage-gpfs2/wangqianyi2/slime/models/reward_model}
+REWARD_LOG_DIR=${REWARD_LOG_DIR:-$REWARD_DIR/logs}
+REWARD_RUN_TS=${REWARD_RUN_TS:-$(date +%Y%m%d-%H%M%S)}
+REWARD_RUN_TAG=${REWARD_RUN_TAG:-round${ROUND_ID:-0}_rollout${ROLLOUT_END:-335}_${REWARD_RUN_TS}}
+RUN_LOG=$REWARD_LOG_DIR/reward_update_${REWARD_RUN_TAG}.log
+mkdir -p "$REWARD_LOG_DIR"
+exec > >(tee -a "$RUN_LOG") 2>&1
+
 set -ex
 
 SLIME=${SLIME:-/mnt/shared-storage-gpfs2/wangqianyi2/slime}
@@ -23,6 +31,7 @@ REWARD_EVAL_PATH=${REWARD_EVAL_PATH:-}
 REWARD_EVAL_TARGET_PATH=${REWARD_EVAL_TARGET_PATH:-}
 REWARD_EVAL_HOLDOUT_RATIO=${REWARD_EVAL_HOLDOUT_RATIO:-0.1}
 REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-200}
+REWARD_UPDATE_BATCH_SIZE=${REWARD_UPDATE_BATCH_SIZE:-4}
 
 if [ ! -f "$REWARD_TRAIN_SYNTH_PATH" ]; then
   echo "ERROR: missing synthetic reward train data at $REWARD_TRAIN_SYNTH_PATH" >&2
@@ -39,7 +48,7 @@ if [ -n "$REWARD_EVAL_TARGET_PATH" ] && [ ! -f "$REWARD_EVAL_TARGET_PATH" ]; the
   exit 1
 fi
 
-REWARD_DIR=$SLIME/models/reward_model
+REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
 mkdir -p $REWARD_DIR
 
 ARGS_JSON=$REWARD_DIR/reward_update_args.json
@@ -52,7 +61,7 @@ cat > $ARGS_JSON <<EOF
   "reward_demo_prompt_key": "text",
   "reward_demo_answer_key": "chosen",
   "reward_update_epochs": 2,
-  "reward_update_batch_size": 8,
+  "reward_update_batch_size": $REWARD_UPDATE_BATCH_SIZE,
   "reward_update_lr": 1e-6,
   "c_coef_init": 0.5,
   "c_coef_min": 0.01,
@@ -76,8 +85,11 @@ cat > $ARGS_JSON <<EOF
 }
 EOF
 
-echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END) ==="
+echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END, batch=$REWARD_UPDATE_BATCH_SIZE, log=$RUN_LOG) ==="
 
+TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG:-DETAIL} \
+PYTHONFAULTHANDLER=1 \
+TORCH_SHOW_CPP_STACKTRACES=1 \
 ROUND_ID=${ROUND_ID:-0} accelerate launch \
   --num_processes 8 \
   --mixed_precision bf16 \
