@@ -344,45 +344,9 @@ _ARGS_CACHE = [None, None]
 
 
 def _apply_reward_shaping(reward, sample):
-    response_len = getattr(sample, "response_length", 0)
-    response_text = getattr(sample, "response", "")
-
-    # Length penalties
-    if response_len < _SHORT_RESPONSE_THRESHOLD:
-        reward -= _SHORT_PENALTY
-    if response_len >= _TRUNCATION_THRESHOLD:
-        reward -= _TRUNCATION_PENALTY
-
-    # Role confusion penalties
-    if response_text.lstrip().startswith("Human:") or "\nHuman:" in response_text:
-        reward -= _HUMAN_CONTINUATION_PENALTY
-    if response_text.lstrip().startswith("Assistant:"):
-        reward -= _ASSISTANT_PREFIX_PENALTY
-
-    # Generic hygiene penalty for outputs dominated by non-printing characters.
-    non_printing_count = count_non_printing_chars(response_text)
-    if non_printing_count:
-        non_printing_ratio = non_printing_char_ratio(response_text)
-        if non_printing_count >= _NON_PRINTING_COUNT_THRESHOLD or non_printing_ratio >= _NON_PRINTING_RATIO_THRESHOLD:
-            severity = max(
-                non_printing_count / max(_NON_PRINTING_COUNT_THRESHOLD, 1),
-                non_printing_ratio / max(_NON_PRINTING_RATIO_THRESHOLD, 1e-6),
-            )
-            reward -= min(_NON_PRINTING_PENALTY_MAX, severity)
-
-    # Repetition penalty (4-gram)
-    words = response_text.split()
-    if len(words) >= 8:
-        ngrams = {}
-        for i in range(len(words) - 3):
-            ng = tuple(words[i:i+4])
-            ngrams[ng] = ngrams.get(ng, 0) + 1
-        if ngrams:
-            max_count = max(ngrams.values())
-            if max_count > 3:
-                penalty = 2.0 * (max_count - 3) / max(len(ngrams), 1)
-                reward -= min(penalty, _REPETITION_PENALTY_MAX)
-    return max(-5.0, min(reward, 5.0))
+    # PPO should optimize the reward model's raw score directly so training,
+    # TB rollout/raw_reward, and reward_eval all share the same target.
+    return reward
 
 
 def _ensure_worker(args):

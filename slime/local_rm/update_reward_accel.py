@@ -23,7 +23,6 @@ except ImportError:
     _HAS_TB = False
 
 from .data import (
-    TokenSample,
     iter_batches,
     load_demo_samples,
     load_prompt_answer_samples,
@@ -32,12 +31,10 @@ from .data import (
 )
 from .model import (
     RunningMeanStd,
-    build_prompt_text,
     get_reward_normalization_stats,
     get_sequence_rewards,
     init_reward_model,
     load_tokenizer,
-    tokenize_prompt_answer,
 )
 from slime.utils.logging_utils import configure_logger
 
@@ -239,78 +236,6 @@ def _load_external_eval_data(args, tokenizer):
     return chosen_tokens, target_tokens, stats
 
 
-def _load_static_pref_data(args, tokenizer):
-    static_path = getattr(args, "reward_static_pref_path", None)
-    if not static_path:
-        return [], [], {"loaded": 0, "skipped": 0, "path": None}
-
-    apply_ct = getattr(args, "apply_chat_template", False)
-    apply_ct_kwargs = getattr(args, "apply_chat_template_kwargs", None)
-    prompt_key = getattr(args, "reward_static_pref_prompt_key", "text")
-    chosen_key = getattr(args, "reward_static_pref_chosen_key", "chosen")
-    rejected_key = getattr(args, "reward_static_pref_rejected_key", "rejected")
-    chosen_samples = []
-    rejected_samples = []
-    skipped_pairs = 0
-
-    with open(static_path, encoding="utf-8") as f:
-        for line_no, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            item = json.loads(line)
-            prompt = item[prompt_key]
-            chosen_answer = item[chosen_key]
-            rejected_answer = item[rejected_key]
-            chosen_demo = tokenize_prompt_answer(
-                tokenizer,
-                prompt=prompt,
-                answer=chosen_answer,
-                apply_chat_template=apply_ct,
-                apply_chat_template_kwargs=apply_ct_kwargs,
-            )
-            rejected_demo = tokenize_prompt_answer(
-                tokenizer,
-                prompt=prompt,
-                answer=rejected_answer,
-                apply_chat_template=apply_ct,
-                apply_chat_template_kwargs=apply_ct_kwargs,
-            )
-            if chosen_demo.response_length <= 0 or rejected_demo.response_length <= 0:
-                skipped_pairs += 1
-                continue
-            prompt_text = build_prompt_text(
-                tokenizer,
-                prompt,
-                apply_chat_template=apply_ct,
-                apply_chat_template_kwargs=apply_ct_kwargs,
-            )
-            raw_prompt = prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
-            chosen_samples.append(
-                TokenSample(
-                    tokens=chosen_demo.tokens,
-                    response_length=chosen_demo.response_length,
-                    prompt=prompt_text,
-                    raw_prompt=raw_prompt,
-                )
-            )
-            rejected_samples.append(
-                TokenSample(
-                    tokens=rejected_demo.tokens,
-                    response_length=rejected_demo.response_length,
-                    prompt=prompt_text,
-                    raw_prompt=raw_prompt,
-                )
-            )
-
-    if len(chosen_samples) != len(rejected_samples):
-        raise RuntimeError(
-            "Static preference data still mismatched after pairwise filtering: %d vs %d"
-            % (len(chosen_samples), len(rejected_samples))
-        )
-    return chosen_samples, rejected_samples, {"loaded": len(chosen_samples), "skipped": skipped_pairs, "path": static_path}
-
-
 def _run_inline_eval(model, chosen_tokens, target_tokens, pad_id, device, batch_size=8):
     if not chosen_tokens:
         return -1.0, 0.0
@@ -445,8 +370,6 @@ def main():
             "Example prompt prefix: %s" % (missing_count, example_prompt)
         )
 
-    static_pref_chosen_samples, static_pref_rejected_samples, static_pref_stats = _load_static_pref_data(args, tokenizer)
-
     holdout_ratio = float(getattr(args, "reward_eval_holdout_ratio", 0.1) or 0.0)
     train_rollout_samples_all, eval_rollout_samples, split_stats = _split_rollout_samples_by_prompt(
         all_rollout_samples,
@@ -490,10 +413,6 @@ def main():
                 len(train_rollout_samples_all),
                 len(eval_rollout_samples),
             )
-        )
-        accelerator.print(
-            "Loaded %d static preference pairs (skipped=%d)"
-            % (len(static_pref_chosen_samples), static_pref_stats.get("skipped", 0))
         )
         accelerator.print(
             "Prompt split: total=%d train=%d eval=%d holdout_ratio=%.3f"
@@ -569,17 +488,8 @@ def main():
     coef_scale_up = getattr(args, "coef_scale_up", 1.2)
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
-    static_pref_weight = float(getattr(args, "reward_static_pref_weight", 0.0) or 0.0)
     online_pref_weight = float(getattr(args, "reward_online_pref_weight", 1.0) or 0.0)
-    static_pref_batch_size = int(
-        getattr(args, "reward_static_pref_batch_size", args.reward_update_batch_size) or args.reward_update_batch_size
-    )
-    static_pref_enabled = (
-        static_pref_weight > 0.0 and static_pref_batch_size > 0 and len(static_pref_chosen_samples) > 0
-    )
-    if static_pref_weight > 0.0 and not static_pref_chosen_samples:
-        raise RuntimeError("Static preference weight is enabled but no static preference pairs were loaded.")
-    if static_pref_weight <= 0.0 and online_pref_weight <= 0.0:
+    if online_pref_weight <= 0.0:
         raise RuntimeError("Reward update requires at least one positive preference weight.")
 
     num_training_batches_local = len(rollout_samples) // args.reward_update_batch_size
@@ -631,67 +541,22 @@ def main():
             demo_tokens = [sample.tokens for sample in demo_batch]
             roll_tokens = [sample.tokens for sample in roll_batch]
 
-            rewards_anchor_chosen = None
-            rewards_anchor_rejected = None
-            rewards_anchor_chosen_old = None
-            rewards_anchor_rejected_old = None
-            if static_pref_enabled:
-                static_indices = [random.randrange(len(static_pref_chosen_samples)) for _ in range(static_pref_batch_size)]
-                static_chosen_tokens = [static_pref_chosen_samples[i].tokens for i in static_indices]
-                static_rejected_tokens = [static_pref_rejected_samples[i].tokens for i in static_indices]
-                rewards_anchor_chosen = get_sequence_rewards(model, static_chosen_tokens, pad_id, accelerator.device)
-                rewards_anchor_rejected = get_sequence_rewards(model, static_rejected_tokens, pad_id, accelerator.device)
-
             rewards_demo = get_sequence_rewards(model, demo_tokens, pad_id, accelerator.device)
             rewards_roll = get_sequence_rewards(model, roll_tokens, pad_id, accelerator.device)
 
             with torch.no_grad():
-                if static_pref_enabled:
-                    rewards_anchor_chosen_old = get_sequence_rewards(
-                        old_model,
-                        static_chosen_tokens,
-                        pad_id,
-                        accelerator.device,
-                    )
-                    rewards_anchor_rejected_old = get_sequence_rewards(
-                        old_model,
-                        static_rejected_tokens,
-                        pad_id,
-                        accelerator.device,
-                    )
                 rewards_demo_old = get_sequence_rewards(old_model, demo_tokens, pad_id, accelerator.device)
                 rewards_roll_old = get_sequence_rewards(old_model, roll_tokens, pad_id, accelerator.device)
-                if static_pref_enabled and (
-                    not torch.isfinite(rewards_anchor_chosen_old).all().item()
-                    or not torch.isfinite(rewards_anchor_rejected_old).all().item()
-                ):
-                    raise RuntimeError("Old reward model produced non-finite static preference rewards; checkpoint is corrupted.")
                 if not torch.isfinite(rewards_demo_old).all().item() or not torch.isfinite(rewards_roll_old).all().item():
                     raise RuntimeError("Old reward model produced non-finite rewards; checkpoint is corrupted.")
 
-            if static_pref_enabled and (
-                not torch.isfinite(rewards_anchor_chosen).all().item()
-                or not torch.isfinite(rewards_anchor_rejected).all().item()
-            ):
-                raise RuntimeError("Reward model produced non-finite static preference rewards before optimization.")
             if not torch.isfinite(rewards_demo).all().item() or not torch.isfinite(rewards_roll).all().item():
                 raise RuntimeError("Reward model produced non-finite rewards before optimization.")
 
-            anchor_margin = torch.zeros((), device=accelerator.device)
-            if static_pref_enabled:
-                anchor_margin = rewards_anchor_chosen.float().mean() - rewards_anchor_rejected.float().mean()
             online_margin = rewards_demo.float().mean() - rewards_roll.float().mean()
 
             preference_objective = online_pref_weight * online_margin
             delta_terms = [rewards_demo - rewards_demo_old, rewards_roll - rewards_roll_old]
-            if static_pref_enabled:
-                preference_objective = preference_objective + static_pref_weight * anchor_margin
-                delta_terms.extend(
-                    [
-                        rewards_anchor_chosen - rewards_anchor_chosen_old,
-                        rewards_anchor_rejected - rewards_anchor_rejected_old,
-                    ]
-                )
 
             delta = torch.cat(delta_terms, dim=0).float()
             epsilon = torch.sqrt(torch.mean(delta ** 2) + epsilon_stability_eps)
@@ -732,21 +597,12 @@ def main():
                 online_margin_global = accelerator.gather((rewards_demo - rewards_roll).detach().float()).mean().item()
                 r_demo_global = accelerator.gather(rewards_demo.detach().float()).mean().item()
                 r_roll_global = accelerator.gather(rewards_roll.detach().float()).mean().item()
-                anchor_acc = 0.0
-                anchor_margin_global = 0.0
-                if static_pref_enabled:
-                    anchor_acc = accelerator.gather((rewards_anchor_chosen > rewards_anchor_rejected).float()).mean().item()
-                    anchor_margin_global = accelerator.gather(
-                        (rewards_anchor_chosen - rewards_anchor_rejected).detach().float()
-                    ).mean().item()
 
             global_batch_idx += 1
 
             if tb_writer is not None:
                 tb_writer.add_scalar("reward/loss", loss.item(), global_batch_idx)
-                tb_writer.add_scalar("reward/anchor_margin", anchor_margin_global, global_batch_idx)
                 tb_writer.add_scalar("reward/online_margin", online_margin_global, global_batch_idx)
-                tb_writer.add_scalar("reward/anchor_acc", anchor_acc, global_batch_idx)
                 tb_writer.add_scalar("reward/online_acc", online_acc, global_batch_idx)
                 tb_writer.add_scalar("reward/irl_margin", online_margin_global, global_batch_idx)
                 tb_writer.add_scalar("reward/matched_margin", online_margin_global, global_batch_idx)
@@ -784,8 +640,6 @@ def main():
                         f" acc={acc:.4f}"
                         f" margin={margin:.4f}"
                         f" loss={loss.item():.4f}"
-                        f" anchor_margin={anchor_margin_global:.4f}"
-                        f" anchor_acc={anchor_acc:.4f}"
                         f" online_margin={online_margin_global:.4f}"
                         f" online_acc={online_acc:.4f}"
                         f" epsilon={epsilon_global:.4f}"
@@ -797,8 +651,6 @@ def main():
                     f"[reward_update] rollout={cli.rollout_id}"
                     f" batch={global_batch_idx}"
                     f" loss={loss.item():.4f}"
-                    f" anchor_margin={anchor_margin_global:.4f}"
-                    f" anchor_acc={anchor_acc:.4f}"
                     f" online_margin={online_margin_global:.4f}"
                     f" online_acc={online_acc:.4f}"
                     f" r_demo={r_demo_global:.4f}"

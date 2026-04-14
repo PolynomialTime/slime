@@ -24,9 +24,13 @@ export PYTHONPATH="$SLIME${PYTHONPATH:+:$PYTHONPATH}"
 ULTRAFEEDBACK_DIR="${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}"
 SAVE_DIR="${SAVE_DIR:-$SLIME/models/save_dir_single_ppo_r1_reward}"
 SAVE_TAG="${SAVE_TAG:-$(basename "$SAVE_DIR")}"
-CHECKPOINT_TAG="${CHECKPOINT_TAG:-${SAVE_TAG}_rollout${ROLLOUT_COUNT}}"
+EXPORT_TAG="${EXPORT_TAG:-$SAVE_TAG}"
+if [[ "$EXPORT_TAG" == save_dir_* ]]; then
+  EXPORT_TAG="${EXPORT_TAG#save_dir_}"
+fi
+CHECKPOINT_TAG="${CHECKPOINT_TAG:-${EXPORT_TAG}_rollout${ROLLOUT_COUNT}}"
 POLICY_HF_DIR="${POLICY_HF_DIR:-$SLIME/models/${CHECKPOINT_TAG}_hf}"
-OUTPUT_PATH="${OUTPUT_PATH:-$SLIME/eval/${CHECKPOINT_TAG}.jsonl}"
+OUTPUT_PATH="${OUTPUT_PATH:-$SLIME/eval/outputs_${CHECKPOINT_TAG}.jsonl}"
 ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8b-base}"
 TEST_DATA="${TEST_DATA:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}"
 SGLANG_PORT="${SGLANG_PORT:-30010}"
@@ -38,6 +42,14 @@ KEEP_POLICY_HF="${KEEP_POLICY_HF:-0}"
 FORCE_EXPORT="${FORCE_EXPORT:-0}"
 
 mkdir -p "$SLIME/eval"
+
+run_rm() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo rm "$@"
+  else
+    rm "$@"
+  fi
+}
 
 check_disk_space() {
   local stage=$1
@@ -98,17 +110,7 @@ generate_with_sglang() {
   cleanup
 }
 
-if [ ! -f "$SAVE_DIR/latest_checkpointed_iteration.txt" ]; then
-  echo "ERROR: missing checkpoint marker at $SAVE_DIR/latest_checkpointed_iteration.txt" >&2
-  exit 1
-fi
-
-LATEST_ITER=$(cat "$SAVE_DIR/latest_checkpointed_iteration.txt")
 ITER=$((ROLLOUT_COUNT - 1))
-if [ "$ITER" -gt "$LATEST_ITER" ]; then
-  echo "ERROR: requested rollout_count=$ROLLOUT_COUNT maps to iter=$ITER, but latest saved iter is $LATEST_ITER" >&2
-  exit 1
-fi
 
 EXPECTED_EVAL_LINES=2000
 if [ -f "$TEST_DATA" ]; then
@@ -139,8 +141,8 @@ if [ -f "$POLICY_HF_DIR/config.json" ]; then
 fi
 
 if [ "$FORCE_EXPORT" -eq 1 ]; then
-  sudo rm -rf "$POLICY_HF_DIR"
-  sudo rm -f "$OUTPUT_PATH"
+  run_rm -rf "$POLICY_HF_DIR"
+  run_rm -f "$OUTPUT_PATH"
   hf_ready=0
   output_ready=0
 fi
@@ -149,7 +151,7 @@ if [ "$output_ready" -eq 1 ]; then
   echo "Checkpoint rollout $ROLLOUT_COUNT output already complete at $OUTPUT_PATH"
   if [ "$KEEP_POLICY_HF" -ne 1 ] && [ "$hf_ready" -eq 1 ]; then
     echo "Removing stale HF export at $POLICY_HF_DIR"
-    sudo rm -rf "$POLICY_HF_DIR"
+    run_rm -rf "$POLICY_HF_DIR"
   fi
   exit 0
 fi
@@ -172,12 +174,14 @@ generate_with_sglang "$POLICY_HF_DIR" "$OUTPUT_PATH"
 
 if [ "$KEEP_POLICY_HF" -ne 1 ]; then
   echo "Removing HF export at $POLICY_HF_DIR"
-  sudo rm -rf "$POLICY_HF_DIR"
+  run_rm -rf "$POLICY_HF_DIR"
 fi
 
 echo "Checkpoint export finished"
+echo "  export_tag:    $EXPORT_TAG"
 echo "  save_dir:      $SAVE_DIR"
 echo "  rollout_count: $ROLLOUT_COUNT"
+echo "  iter:          $(printf "%07d" "$ITER")"
 echo "  checkpoint:    $CKPT_DIR"
 echo "  hf_export:     $POLICY_HF_DIR"
 echo "  eval_output:   $OUTPUT_PATH"
