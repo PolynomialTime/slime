@@ -17,6 +17,32 @@ from torch.distributed.distributed_c10d import (
 GLOO_GROUP = None
 
 
+def _raise_if_masked_values_non_finite(name: str, values: torch.Tensor, mask: torch.Tensor) -> None:
+    active_mask = mask.to(dtype=torch.bool)
+    if active_mask.numel() == 0 or not active_mask.any():
+        return
+
+    active_values = values.detach()[active_mask]
+    finite_mask = torch.isfinite(active_values)
+    if finite_mask.all():
+        return
+
+    invalid_count = int((~finite_mask).sum().item())
+    total_count = int(active_values.numel())
+    finite_values = active_values[finite_mask]
+    if finite_values.numel() > 0:
+        min_val = float(finite_values.min().item())
+        max_val = float(finite_values.max().item())
+    else:
+        min_val = float("nan")
+        max_val = float("nan")
+
+    raise RuntimeError(
+        f"{name} contains non-finite masked values: invalid={invalid_count}/{total_count} "
+        f"finite_min={min_val:.6g} finite_max={max_val:.6g}"
+    )
+
+
 def init_gloo_group():
     """Initialize Gloo group for distributed communication."""
     global GLOO_GROUP
@@ -116,13 +142,17 @@ def distributed_masked_whiten(
     Returns:
         torch.Tensor: The locally whitened tensor using global statistics.
     """
+    _raise_if_masked_values_non_finite("distributed_masked_whiten.values", values, mask)
+
+    mask = mask.to(dtype=torch.float32, device=values.device)
+
     # Calculate local intermediate statistics
-    local_sum = (values * mask).sum()
-    local_sum_sq = ((values**2) * mask).sum()
+    values_fp32 = values.float()
+    local_sum = (values_fp32 * mask).sum()
+    local_sum_sq = ((values_fp32**2) * mask).sum()
     local_mask_sum = mask.sum()
 
-    stats_tensor = torch.tensor(
-        [local_sum, local_sum_sq, local_mask_sum],
+    stats_tensor = torch.stack([local_sum, local_sum_sq, local_mask_sum]).to(
         device=values.device,
         dtype=torch.float32,
     )
@@ -145,10 +175,20 @@ def distributed_masked_whiten(
         bessel_correction = global_mask_sum / (global_mask_sum - 1)
         global_var = global_var * bessel_correction
 
+    if not torch.isfinite(global_mean):
+        raise RuntimeError(f"distributed_masked_whiten global_mean is non-finite: {global_mean.item()}")
+    if not torch.isfinite(global_var):
+        raise RuntimeError(f"distributed_masked_whiten global_var is non-finite: {global_var.item()}")
+
+    global_var = torch.clamp(global_var, min=0.0)
+
     # Whiten local data using global stats
-    whitened_values = (values - global_mean) * torch.rsqrt(global_var + epsilon)
+    whiten_scale = torch.rsqrt(global_var + epsilon).to(dtype=values.dtype)
+    whitened_values = (values - global_mean.to(dtype=values.dtype)) * whiten_scale
 
     if not shift_mean:
-        whitened_values += global_mean
+        whitened_values += global_mean.to(dtype=values.dtype)
+
+    _raise_if_masked_values_non_finite("distributed_masked_whiten.output", whitened_values, mask)
 
     return whitened_values

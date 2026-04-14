@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 from collections import defaultdict
 from pathlib import Path
 
@@ -77,8 +78,11 @@ def reward_eval(args, rollout_id: int) -> None:
         apply_chat_template_kwargs=args.apply_chat_template_kwargs,
     )
     max_samples = getattr(args, "reward_eval_max_samples", None)
-    if max_samples is not None:
-        positive_samples = positive_samples[:max_samples]
+    shuffle_seed = int(getattr(args, "reward_eval_shuffle_seed", 42))
+    if max_samples is not None and len(positive_samples) > max_samples:
+        shuffled_positive_samples = list(positive_samples)
+        random.Random(shuffle_seed).shuffle(shuffled_positive_samples)
+        positive_samples = shuffled_positive_samples[:max_samples]
 
     if target_path:
         target_samples = load_prompt_answer_samples(

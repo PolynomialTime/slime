@@ -1,5 +1,6 @@
 from argparse import Namespace
 from collections.abc import Callable, Iterator
+import math
 from typing import Any
 
 import torch
@@ -18,10 +19,52 @@ from slime.utils.ppo_utils import (
     get_grpo_returns,
     get_reinforce_plus_plus_baseline_advantages,
     get_reinforce_plus_plus_returns,
+    safe_exp,
 )
 from slime.utils.types import RolloutBatch
 
 from .cp_utils import all_gather_with_cp, get_logits_and_tokens_offset_with_cp, get_sum_of_sample_mean
+
+
+def _raise_if_non_finite_tensor(name: str, tensor: torch.Tensor) -> None:
+    if tensor is None or tensor.numel() == 0:
+        return
+
+    detached = tensor.detach()
+    finite_mask = torch.isfinite(detached)
+    if finite_mask.all():
+        return
+
+    invalid_count = int((~finite_mask).sum().item())
+    total_count = int(detached.numel())
+    finite_values = detached[finite_mask]
+    if finite_values.numel() > 0:
+        min_val = float(finite_values.min().item())
+        max_val = float(finite_values.max().item())
+    else:
+        min_val = float("nan")
+        max_val = float("nan")
+
+    raise RuntimeError(
+        f"{name} contains non-finite values: invalid={invalid_count}/{total_count} "
+        f"finite_min={min_val:.6g} finite_max={max_val:.6g}"
+    )
+
+
+def _raise_if_non_finite_tensor_list(name: str, tensors: list[torch.Tensor] | None) -> None:
+    if tensors is None:
+        return
+    for idx, tensor in enumerate(tensors):
+        _raise_if_non_finite_tensor(f"{name}[{idx}]", tensor)
+
+
+def _raise_if_non_finite_scalar_list(name: str, values: list[float] | None) -> None:
+    if values is None:
+        return
+    for idx, value in enumerate(values):
+        scalar = float(value)
+        if not math.isfinite(scalar):
+            raise RuntimeError(f"{name}[{idx}] is non-finite: {scalar}")
 
 
 def get_responses(
@@ -266,14 +309,18 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             )
             for i in range(len(log_probs))
         ]
+    _raise_if_non_finite_tensor_list("kl", kl)
 
     if args.advantage_estimator in ["grpo", "gspo"]:
+        _raise_if_non_finite_scalar_list("rewards", rewards)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
         returns = get_grpo_returns(rewards, kl)
         # TODO: is the copy necessary?
         advantages = [r for r in returns]
 
     elif args.advantage_estimator == "ppo":
+        _raise_if_non_finite_tensor_list("values", values)
+        _raise_if_non_finite_scalar_list("rewards", rewards)
         old_rewards = rewards
         rewards = []
         kl_coef = -args.kl_coef
@@ -283,11 +330,13 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             if cp_rank == 0:
                 k[-1] += reward
             rewards.append(k)
+        _raise_if_non_finite_tensor_list("ppo_rewards", rewards)
         advantages, returns = get_advantages_and_returns_batch(
             total_lengths, response_lengths, values, rewards, args.gamma, args.lambd
         )
 
     elif args.advantage_estimator == "reinforce_plus_plus":
+        _raise_if_non_finite_scalar_list("rewards", rewards)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
         returns = get_reinforce_plus_plus_returns(
             rewards=rewards,
@@ -301,6 +350,7 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
         advantages = [r for r in returns]
 
     elif args.advantage_estimator == "reinforce_plus_plus_baseline":
+        _raise_if_non_finite_scalar_list("rewards", rewards)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
         advantages = get_reinforce_plus_plus_baseline_advantages(
             rewards=rewards,
@@ -329,9 +379,13 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
     else:
         raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
 
+    _raise_if_non_finite_tensor_list("advantages_pre_norm", advantages)
+    _raise_if_non_finite_tensor_list("returns", returns)
+
     # TODO: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.
     if args.normalize_advantages:
         all_advs = torch.cat(advantages)
+        _raise_if_non_finite_tensor("advantages_concat_pre_norm", all_advs)
         cp_size = mpu.get_context_parallel_world_size()
         if cp_size == 1:
             all_masks = torch.cat(loss_masks)
@@ -382,8 +436,11 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
                 process_group=dp_group,
                 shift_mean=True,
             )
+            _raise_if_non_finite_tensor("advantages_concat_post_norm", whitened_advs_flat)
             chunk_lengths = [chunk.size(0) for chunk in advantages]
             advantages = list(torch.split(whitened_advs_flat, chunk_lengths))
+
+    _raise_if_non_finite_tensor_list("advantages", advantages)
 
     rollout_data["advantages"] = advantages
     rollout_data["returns"] = returns
@@ -400,8 +457,8 @@ def vanilla_tis_function(
 ) -> tuple[torch.Tensor, list[torch.Tensor], dict[str, torch.Tensor]]:
     rollout_log_probs = torch.cat(rollout_log_probs, dim=0)
     old_log_probs = torch.cat(train_log_probs, dim=0)
-    tis = torch.exp(old_log_probs - rollout_log_probs)
-    tis_abs = (torch.exp(old_log_probs - rollout_log_probs) - 1).abs()
+    tis = safe_exp(old_log_probs - rollout_log_probs)
+    tis_abs = (tis - 1).abs()
     tis_weights = torch.clamp(tis, min=args.tis_clip_low, max=args.tis_clip)
     tis_clipfrac = (tis_weights != tis).float()
     metrics = {
@@ -424,8 +481,8 @@ def icepop_function(
 ) -> tuple[torch.Tensor, list[torch.Tensor], dict[str, torch.Tensor]]:
     rollout_log_probs = torch.cat(rollout_log_probs, dim=0)
     old_log_probs = torch.cat(train_log_probs, dim=0)
-    ice_ratio = torch.exp(old_log_probs - rollout_log_probs)
-    ice_abs = (torch.exp(old_log_probs - rollout_log_probs) - 1).abs()
+    ice_ratio = safe_exp(old_log_probs - rollout_log_probs)
+    ice_abs = (ice_ratio - 1).abs()
     ice_weight = torch.where(
         (ice_ratio >= args.tis_clip_low) & (ice_ratio <= args.tis_clip), ice_ratio, torch.zeros_like(ice_ratio)
     )
@@ -487,6 +544,8 @@ def policy_loss_function(
     )
 
     log_probs = log_probs_and_entropy["log_probs"]
+    _raise_if_non_finite_tensor_list("current_log_probs", log_probs)
+    _raise_if_non_finite_tensor("advantages", advantages)
 
     # Pre-gather log probs if needed by OPSM or GSPO to avoid duplicate gathering
     need_full_log_probs = args.use_opsm or args.advantage_estimator == "gspo"
@@ -532,6 +591,10 @@ def policy_loss_function(
         log_probs = torch.cat(log_probs, dim=0)
         ppo_kl = old_log_probs - log_probs
 
+    _raise_if_non_finite_tensor("old_log_probs", old_log_probs)
+    _raise_if_non_finite_tensor("log_probs", log_probs)
+    _raise_if_non_finite_tensor("ppo_kl", ppo_kl)
+
     pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, args.eps_clip, args.eps_clip_high)
 
     if args.use_opsm:
@@ -551,7 +614,7 @@ def policy_loss_function(
 
         assert "rollout_log_probs" in batch, "rollout_log_probs must be provided for TIS"
 
-        ois = (-ppo_kl).exp()
+        ois = safe_exp(-ppo_kl)
         tis_kwargs = {
             "args": args,
             "pg_loss": pg_loss,
@@ -606,13 +669,14 @@ def policy_loss_function(
         ref_log_probs = torch.cat(ref_log_probs, dim=0)
         importance_ratio = None
         if args.use_unbiased_kl:
-            importance_ratio = torch.exp(log_probs - old_log_probs)
+            importance_ratio = safe_exp(log_probs - old_log_probs)
         kl = compute_approx_kl(
             log_probs,
             ref_log_probs,
             kl_loss_type=args.kl_loss_type,
             importance_ratio=importance_ratio,
         )
+        _raise_if_non_finite_tensor("kl_loss_tensor", kl)
         kl_loss = sum_of_sample_mean(kl)
 
         loss = loss + args.kl_loss_coef * kl_loss
@@ -691,6 +755,9 @@ def value_loss_function(
     values = torch.cat([value.flatten() for value in values["values"]], dim=0)
 
     returns = torch.cat(batch["returns"], dim=0)
+    _raise_if_non_finite_tensor("old_values", old_values)
+    _raise_if_non_finite_tensor("values", values)
+    _raise_if_non_finite_tensor("returns", returns)
 
     values_clipfrac = torch.abs(values - old_values) > args.value_clip
     values_clipped = old_values + (values - old_values).clamp(-args.value_clip, args.value_clip)

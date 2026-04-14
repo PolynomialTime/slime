@@ -1,4 +1,5 @@
 import argparse
+import gc
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ except ImportError:
     _HAS_TB = False
 
 from .data import (
+    TokenSample,
     iter_batches,
     load_demo_samples,
     load_prompt_answer_samples,
@@ -30,10 +32,12 @@ from .data import (
 )
 from .model import (
     RunningMeanStd,
+    build_prompt_text,
     get_reward_normalization_stats,
     get_sequence_rewards,
     init_reward_model,
     load_tokenizer,
+    tokenize_prompt_answer,
 )
 from slime.utils.logging_utils import configure_logger
 
@@ -171,32 +175,47 @@ def _build_holdout_eval_data(eval_rollout_samples, demo_samples_by_prompt, max_s
 def _load_external_eval_data(args, tokenizer):
     eval_path = getattr(args, "reward_eval_path", None) or getattr(args, "reward_demo_path", None)
     target_path = getattr(args, "reward_eval_target_path", None)
-    if not eval_path or not target_path:
+    rejected_key = getattr(args, "reward_eval_rejected_key", None)
+    if not eval_path or (not target_path and not rejected_key):
         return [], [], {"positive": 0, "targets": 0, "matched": 0, "missing": 0, "source": "none"}
 
     apply_ct = getattr(args, "apply_chat_template", False)
     apply_ct_kwargs = getattr(args, "apply_chat_template_kwargs", None)
     max_samples = getattr(args, "reward_eval_max_samples", None)
+    shuffle_seed = int(getattr(args, "reward_eval_shuffle_seed", 42))
+    eval_prompt_key = getattr(args, "reward_eval_prompt_key", None) or getattr(args, "reward_demo_prompt_key", "text")
 
     positive_samples = load_prompt_answer_samples(
         eval_path,
         tokenizer=tokenizer,
-        prompt_key=getattr(args, "reward_eval_prompt_key", None) or getattr(args, "reward_demo_prompt_key", "text"),
+        prompt_key=eval_prompt_key,
         answer_key=getattr(args, "reward_eval_chosen_key", "chosen"),
         apply_chat_template=apply_ct,
         apply_chat_template_kwargs=apply_ct_kwargs,
     )
-    if max_samples is not None:
-        positive_samples = positive_samples[:max_samples]
+    if max_samples is not None and len(positive_samples) > max_samples:
+        shuffled_positive_samples = list(positive_samples)
+        random.Random(shuffle_seed).shuffle(shuffled_positive_samples)
+        positive_samples = shuffled_positive_samples[:max_samples]
 
-    target_samples = load_prompt_answer_samples(
-        target_path,
-        tokenizer=tokenizer,
-        prompt_key=getattr(args, "reward_eval_target_prompt_key", "prompt"),
-        answer_key=getattr(args, "reward_eval_target_answer_key", "response"),
-        apply_chat_template=apply_ct,
-        apply_chat_template_kwargs=apply_ct_kwargs,
-    )
+    if target_path:
+        target_samples = load_prompt_answer_samples(
+            target_path,
+            tokenizer=tokenizer,
+            prompt_key=getattr(args, "reward_eval_target_prompt_key", "prompt"),
+            answer_key=getattr(args, "reward_eval_target_answer_key", "response"),
+            apply_chat_template=apply_ct,
+            apply_chat_template_kwargs=apply_ct_kwargs,
+        )
+    else:
+        target_samples = load_prompt_answer_samples(
+            eval_path,
+            tokenizer=tokenizer,
+            prompt_key=eval_prompt_key,
+            answer_key=rejected_key,
+            apply_chat_template=apply_ct,
+            apply_chat_template_kwargs=apply_ct_kwargs,
+        )
     target_index = _build_prompt_index(target_samples)
 
     chosen_tokens = []
@@ -220,6 +239,78 @@ def _load_external_eval_data(args, tokenizer):
     return chosen_tokens, target_tokens, stats
 
 
+def _load_static_pref_data(args, tokenizer):
+    static_path = getattr(args, "reward_static_pref_path", None)
+    if not static_path:
+        return [], [], {"loaded": 0, "skipped": 0, "path": None}
+
+    apply_ct = getattr(args, "apply_chat_template", False)
+    apply_ct_kwargs = getattr(args, "apply_chat_template_kwargs", None)
+    prompt_key = getattr(args, "reward_static_pref_prompt_key", "text")
+    chosen_key = getattr(args, "reward_static_pref_chosen_key", "chosen")
+    rejected_key = getattr(args, "reward_static_pref_rejected_key", "rejected")
+    chosen_samples = []
+    rejected_samples = []
+    skipped_pairs = 0
+
+    with open(static_path, encoding="utf-8") as f:
+        for line_no, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            prompt = item[prompt_key]
+            chosen_answer = item[chosen_key]
+            rejected_answer = item[rejected_key]
+            chosen_demo = tokenize_prompt_answer(
+                tokenizer,
+                prompt=prompt,
+                answer=chosen_answer,
+                apply_chat_template=apply_ct,
+                apply_chat_template_kwargs=apply_ct_kwargs,
+            )
+            rejected_demo = tokenize_prompt_answer(
+                tokenizer,
+                prompt=prompt,
+                answer=rejected_answer,
+                apply_chat_template=apply_ct,
+                apply_chat_template_kwargs=apply_ct_kwargs,
+            )
+            if chosen_demo.response_length <= 0 or rejected_demo.response_length <= 0:
+                skipped_pairs += 1
+                continue
+            prompt_text = build_prompt_text(
+                tokenizer,
+                prompt,
+                apply_chat_template=apply_ct,
+                apply_chat_template_kwargs=apply_ct_kwargs,
+            )
+            raw_prompt = prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+            chosen_samples.append(
+                TokenSample(
+                    tokens=chosen_demo.tokens,
+                    response_length=chosen_demo.response_length,
+                    prompt=prompt_text,
+                    raw_prompt=raw_prompt,
+                )
+            )
+            rejected_samples.append(
+                TokenSample(
+                    tokens=rejected_demo.tokens,
+                    response_length=rejected_demo.response_length,
+                    prompt=prompt_text,
+                    raw_prompt=raw_prompt,
+                )
+            )
+
+    if len(chosen_samples) != len(rejected_samples):
+        raise RuntimeError(
+            "Static preference data still mismatched after pairwise filtering: %d vs %d"
+            % (len(chosen_samples), len(rejected_samples))
+        )
+    return chosen_samples, rejected_samples, {"loaded": len(chosen_samples), "skipped": skipped_pairs, "path": static_path}
+
+
 def _run_inline_eval(model, chosen_tokens, target_tokens, pad_id, device, batch_size=8):
     if not chosen_tokens:
         return -1.0, 0.0
@@ -237,6 +328,13 @@ def _run_inline_eval(model, chosen_tokens, target_tokens, pad_id, device, batch_
             margin_sum += (c_scores - r_scores).sum().item()
     model.train()
     return correct / total, margin_sum / total
+
+
+def _reload_eval_tolerances(eval_size: int) -> tuple[float, float]:
+    # One flipped pair changes accuracy by 1 / eval_size; anything above that is a real mismatch.
+    acc_tol = 1.1 / max(eval_size, 1)
+    margin_tol = 1e-3
+    return acc_tol, margin_tol
 
 
 def parse_args():
@@ -292,7 +390,15 @@ def main():
     old_model.to(accelerator.device)
 
     all_rollout_samples = []
-    rollout_summary = {"total": 0, "empty": 0, "eos_only": 0, "truncated": 0}
+    rollout_summary = {
+        "total": 0,
+        "empty": 0,
+        "eos_only": 0,
+        "truncated": 0,
+        "response_chars": 0,
+        "non_printing_chars": 0,
+        "non_printing_samples": 0,
+    }
     rollout_paths = [cli.rollout_path]
     window = int(getattr(args, "reward_update_rollout_window", 1) or 1)
     if window > 1 and getattr(args, "save_debug_rollout_data", None):
@@ -339,6 +445,8 @@ def main():
             "Example prompt prefix: %s" % (missing_count, example_prompt)
         )
 
+    static_pref_chosen_samples, static_pref_rejected_samples, static_pref_stats = _load_static_pref_data(args, tokenizer)
+
     holdout_ratio = float(getattr(args, "reward_eval_holdout_ratio", 0.1) or 0.0)
     train_rollout_samples_all, eval_rollout_samples, split_stats = _split_rollout_samples_by_prompt(
         all_rollout_samples,
@@ -384,6 +492,10 @@ def main():
             )
         )
         accelerator.print(
+            "Loaded %d static preference pairs (skipped=%d)"
+            % (len(static_pref_chosen_samples), static_pref_stats.get("skipped", 0))
+        )
+        accelerator.print(
             "Prompt split: total=%d train=%d eval=%d holdout_ratio=%.3f"
             % (
                 split_stats["total_prompts"],
@@ -407,6 +519,25 @@ def main():
                 tb_writer.add_scalar("reward/empty_rollout_frac", rollout_summary["empty"] / total, cli.rollout_id)
                 tb_writer.add_scalar("reward/eos_only_rollout_frac", rollout_summary["eos_only"] / total, cli.rollout_id)
                 tb_writer.add_scalar("reward/truncated_rollout_frac", rollout_summary["truncated"] / total, cli.rollout_id)
+                tb_writer.add_scalar(
+                    "reward/non_printing_rollout_frac",
+                    rollout_summary["non_printing_samples"] / total,
+                    cli.rollout_id,
+                )
+                tb_writer.add_scalar(
+                    "reward/non_printing_rollout_char_frac",
+                    rollout_summary["non_printing_chars"] / max(rollout_summary["response_chars"], 1),
+                    cli.rollout_id,
+                )
+            accelerator.print(
+                "Rollout hygiene before filtering: response_chars=%d non_printing_samples=%d non_printing_chars=%d non_printing_char_frac=%.6f"
+                % (
+                    rollout_summary["response_chars"],
+                    rollout_summary["non_printing_samples"],
+                    rollout_summary["non_printing_chars"],
+                    rollout_summary["non_printing_chars"] / max(rollout_summary["response_chars"], 1),
+                )
+            )
         accelerator.print(
             "Loaded %d eval matched pairs for inline eval (source=%s positive=%d targets=%d missing=%d)"
             % (
@@ -438,6 +569,18 @@ def main():
     coef_scale_up = getattr(args, "coef_scale_up", 1.2)
     coef_scale_down = getattr(args, "coef_scale_down", 0.8)
     target_reward_l2_norm = getattr(args, "target_reward_l2_norm", 5.0)
+    static_pref_weight = float(getattr(args, "reward_static_pref_weight", 0.0) or 0.0)
+    online_pref_weight = float(getattr(args, "reward_online_pref_weight", 1.0) or 0.0)
+    static_pref_batch_size = int(
+        getattr(args, "reward_static_pref_batch_size", args.reward_update_batch_size) or args.reward_update_batch_size
+    )
+    static_pref_enabled = (
+        static_pref_weight > 0.0 and static_pref_batch_size > 0 and len(static_pref_chosen_samples) > 0
+    )
+    if static_pref_weight > 0.0 and not static_pref_chosen_samples:
+        raise RuntimeError("Static preference weight is enabled but no static preference pairs were loaded.")
+    if static_pref_weight <= 0.0 and online_pref_weight <= 0.0:
+        raise RuntimeError("Reward update requires at least one positive preference weight.")
 
     num_training_batches_local = len(rollout_samples) // args.reward_update_batch_size
     local_batch_tensor = torch.tensor(num_training_batches_local, device=accelerator.device)
@@ -488,23 +631,72 @@ def main():
             demo_tokens = [sample.tokens for sample in demo_batch]
             roll_tokens = [sample.tokens for sample in roll_batch]
 
+            rewards_anchor_chosen = None
+            rewards_anchor_rejected = None
+            rewards_anchor_chosen_old = None
+            rewards_anchor_rejected_old = None
+            if static_pref_enabled:
+                static_indices = [random.randrange(len(static_pref_chosen_samples)) for _ in range(static_pref_batch_size)]
+                static_chosen_tokens = [static_pref_chosen_samples[i].tokens for i in static_indices]
+                static_rejected_tokens = [static_pref_rejected_samples[i].tokens for i in static_indices]
+                rewards_anchor_chosen = get_sequence_rewards(model, static_chosen_tokens, pad_id, accelerator.device)
+                rewards_anchor_rejected = get_sequence_rewards(model, static_rejected_tokens, pad_id, accelerator.device)
+
             rewards_demo = get_sequence_rewards(model, demo_tokens, pad_id, accelerator.device)
             rewards_roll = get_sequence_rewards(model, roll_tokens, pad_id, accelerator.device)
 
             with torch.no_grad():
+                if static_pref_enabled:
+                    rewards_anchor_chosen_old = get_sequence_rewards(
+                        old_model,
+                        static_chosen_tokens,
+                        pad_id,
+                        accelerator.device,
+                    )
+                    rewards_anchor_rejected_old = get_sequence_rewards(
+                        old_model,
+                        static_rejected_tokens,
+                        pad_id,
+                        accelerator.device,
+                    )
                 rewards_demo_old = get_sequence_rewards(old_model, demo_tokens, pad_id, accelerator.device)
                 rewards_roll_old = get_sequence_rewards(old_model, roll_tokens, pad_id, accelerator.device)
+                if static_pref_enabled and (
+                    not torch.isfinite(rewards_anchor_chosen_old).all().item()
+                    or not torch.isfinite(rewards_anchor_rejected_old).all().item()
+                ):
+                    raise RuntimeError("Old reward model produced non-finite static preference rewards; checkpoint is corrupted.")
                 if not torch.isfinite(rewards_demo_old).all().item() or not torch.isfinite(rewards_roll_old).all().item():
                     raise RuntimeError("Old reward model produced non-finite rewards; checkpoint is corrupted.")
 
+            if static_pref_enabled and (
+                not torch.isfinite(rewards_anchor_chosen).all().item()
+                or not torch.isfinite(rewards_anchor_rejected).all().item()
+            ):
+                raise RuntimeError("Reward model produced non-finite static preference rewards before optimization.")
             if not torch.isfinite(rewards_demo).all().item() or not torch.isfinite(rewards_roll).all().item():
                 raise RuntimeError("Reward model produced non-finite rewards before optimization.")
 
-            matched_margin = rewards_demo.float().mean() - rewards_roll.float().mean()
-            delta = torch.cat([rewards_demo - rewards_demo_old, rewards_roll - rewards_roll_old], dim=0).float()
+            anchor_margin = torch.zeros((), device=accelerator.device)
+            if static_pref_enabled:
+                anchor_margin = rewards_anchor_chosen.float().mean() - rewards_anchor_rejected.float().mean()
+            online_margin = rewards_demo.float().mean() - rewards_roll.float().mean()
+
+            preference_objective = online_pref_weight * online_margin
+            delta_terms = [rewards_demo - rewards_demo_old, rewards_roll - rewards_roll_old]
+            if static_pref_enabled:
+                preference_objective = preference_objective + static_pref_weight * anchor_margin
+                delta_terms.extend(
+                    [
+                        rewards_anchor_chosen - rewards_anchor_chosen_old,
+                        rewards_anchor_rejected - rewards_anchor_rejected_old,
+                    ]
+                )
+
+            delta = torch.cat(delta_terms, dim=0).float()
             epsilon = torch.sqrt(torch.mean(delta ** 2) + epsilon_stability_eps)
 
-            loss = -(matched_margin - c_coef * epsilon)
+            loss = -(preference_objective - c_coef * epsilon)
             if not torch.isfinite(loss).item():
                 raise RuntimeError("Reward loss became non-finite before backward.")
             optimizer.zero_grad()
@@ -536,18 +728,29 @@ def main():
                     c_coef *= coef_scale_down
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
                 _cfg(model).c_coef = float(c_coef)
-                matched_acc = accelerator.gather((rewards_demo > rewards_roll).float()).mean().item()
-                matched_margin_global = accelerator.gather((rewards_demo - rewards_roll).detach().float()).mean().item()
+                online_acc = accelerator.gather((rewards_demo > rewards_roll).float()).mean().item()
+                online_margin_global = accelerator.gather((rewards_demo - rewards_roll).detach().float()).mean().item()
                 r_demo_global = accelerator.gather(rewards_demo.detach().float()).mean().item()
                 r_roll_global = accelerator.gather(rewards_roll.detach().float()).mean().item()
+                anchor_acc = 0.0
+                anchor_margin_global = 0.0
+                if static_pref_enabled:
+                    anchor_acc = accelerator.gather((rewards_anchor_chosen > rewards_anchor_rejected).float()).mean().item()
+                    anchor_margin_global = accelerator.gather(
+                        (rewards_anchor_chosen - rewards_anchor_rejected).detach().float()
+                    ).mean().item()
 
             global_batch_idx += 1
 
             if tb_writer is not None:
                 tb_writer.add_scalar("reward/loss", loss.item(), global_batch_idx)
-                tb_writer.add_scalar("reward/irl_margin", matched_margin_global, global_batch_idx)
-                tb_writer.add_scalar("reward/matched_margin", matched_margin_global, global_batch_idx)
-                tb_writer.add_scalar("reward/matched_acc", matched_acc, global_batch_idx)
+                tb_writer.add_scalar("reward/anchor_margin", anchor_margin_global, global_batch_idx)
+                tb_writer.add_scalar("reward/online_margin", online_margin_global, global_batch_idx)
+                tb_writer.add_scalar("reward/anchor_acc", anchor_acc, global_batch_idx)
+                tb_writer.add_scalar("reward/online_acc", online_acc, global_batch_idx)
+                tb_writer.add_scalar("reward/irl_margin", online_margin_global, global_batch_idx)
+                tb_writer.add_scalar("reward/matched_margin", online_margin_global, global_batch_idx)
+                tb_writer.add_scalar("reward/matched_acc", online_acc, global_batch_idx)
                 tb_writer.add_scalar("reward/r_demo", r_demo_global, global_batch_idx)
                 tb_writer.add_scalar("reward/r_roll", r_roll_global, global_batch_idx)
                 tb_writer.add_scalar("reward/epsilon", epsilon_global, global_batch_idx)
@@ -581,7 +784,10 @@ def main():
                         f" acc={acc:.4f}"
                         f" margin={margin:.4f}"
                         f" loss={loss.item():.4f}"
-                        f" matched_margin={matched_margin_global:.4f}"
+                        f" anchor_margin={anchor_margin_global:.4f}"
+                        f" anchor_acc={anchor_acc:.4f}"
+                        f" online_margin={online_margin_global:.4f}"
+                        f" online_acc={online_acc:.4f}"
                         f" epsilon={epsilon_global:.4f}"
                         f" c_coef={c_coef:.4f}"
                     )
@@ -591,8 +797,10 @@ def main():
                     f"[reward_update] rollout={cli.rollout_id}"
                     f" batch={global_batch_idx}"
                     f" loss={loss.item():.4f}"
-                    f" matched_margin={matched_margin_global:.4f}"
-                    f" matched_acc={matched_acc:.4f}"
+                    f" anchor_margin={anchor_margin_global:.4f}"
+                    f" anchor_acc={anchor_acc:.4f}"
+                    f" online_margin={online_margin_global:.4f}"
+                    f" online_acc={online_acc:.4f}"
                     f" r_demo={r_demo_global:.4f}"
                     f" r_roll={r_roll_global:.4f}"
                     f" epsilon={epsilon_global:.4f}"
@@ -614,10 +822,6 @@ def main():
 
     if accelerator.is_main_process:
         accelerator.print(f"Reward update completed for rollout {cli.rollout_id}")
-
-    if accelerator.is_main_process and tb_writer is not None:
-        tb_writer.flush()
-        tb_writer.close()
 
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)
@@ -648,6 +852,52 @@ def main():
         unwrapped.save_pretrained(step_dir, safe_serialization=False)
         _atomic_save(unwrapped, model_path)
 
+        reloaded_acc = -1.0
+        reloaded_margin = 0.0
+        reload_acc_gap = None
+        reload_margin_gap = None
+        reload_verified = False
+        if eval_chosen:
+            # Validate that the on-disk checkpoint reloads to the same model we just evaluated in memory.
+            unwrapped.to("cpu")
+            old_model.to("cpu")
+            del model
+            del old_model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            reloaded_model = init_reward_model(base_model, str(step_dir))
+            reloaded_model.eval()
+            reloaded_model.to(accelerator.device)
+            reloaded_acc, reloaded_margin = _run_inline_eval(
+                reloaded_model,
+                eval_chosen,
+                eval_targets,
+                pad_id,
+                accelerator.device,
+                batch_size=eval_batch_size,
+            )
+            reload_acc_gap = abs(reloaded_acc - restored_acc)
+            reload_margin_gap = abs(reloaded_margin - restored_margin)
+            acc_tol, margin_tol = _reload_eval_tolerances(len(eval_chosen))
+            reload_verified = reload_acc_gap <= acc_tol and reload_margin_gap <= margin_tol
+            accelerator.print(
+                "[reward_eval_reloaded] acc=%.4f margin=%.4f acc_gap=%.6f margin_gap=%.6f"
+                % (reloaded_acc, reloaded_margin, reload_acc_gap, reload_margin_gap)
+            )
+            if tb_writer is not None:
+                tb_writer.add_scalar("reward/reloaded_acc", reloaded_acc, global_batch_idx)
+                tb_writer.add_scalar("reward/reloaded_margin", reloaded_margin, global_batch_idx)
+                tb_writer.add_scalar("reward/save_reload_acc_gap", reload_acc_gap, global_batch_idx)
+                tb_writer.add_scalar("reward/save_reload_margin_gap", reload_margin_gap, global_batch_idx)
+            if not reload_verified:
+                raise RuntimeError(
+                    "Reloaded reward checkpoint mismatch: restored_acc=%.6f reloaded_acc=%.6f "
+                    "restored_margin=%.6f reloaded_margin=%.6f"
+                    % (restored_acc, reloaded_acc, restored_margin, reloaded_margin)
+                )
+
         eval_out.write_text(
             json.dumps(
                 {
@@ -662,6 +912,11 @@ def main():
                     "final_matched_margin": final_margin,
                     "restored_matched_acc": restored_acc,
                     "restored_matched_margin": restored_margin,
+                    "reloaded_acc": reloaded_acc,
+                    "reloaded_margin": reloaded_margin,
+                    "save_reload_acc_gap": reload_acc_gap,
+                    "save_reload_margin_gap": reload_margin_gap,
+                    "save_reload_verified": reload_verified,
                     "eval_curve": eval_results,
                     "eval_source": eval_stats.get("source", "holdout"),
                     "eval_stats": eval_stats,
@@ -671,6 +926,10 @@ def main():
             ),
             encoding="utf-8",
         )
+
+    if accelerator.is_main_process and tb_writer is not None:
+        tb_writer.flush()
+        tb_writer.close()
 
 
 if __name__ == "__main__":

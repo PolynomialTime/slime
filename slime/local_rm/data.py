@@ -5,6 +5,7 @@ from typing import Iterable
 import torch
 
 from slime.utils.types import Sample
+from slime.utils.text_hygiene import count_non_printing_chars
 
 from .model import build_prompt_text, tokenize_prompt_answer
 
@@ -133,9 +134,14 @@ def summarize_rollout_samples(rollout_path: str, stop_token_ids: list[int] | Non
         "empty": 0,
         "eos_only": 0,
         "truncated": 0,
+        "response_chars": 0,
+        "non_printing_chars": 0,
+        "non_printing_samples": 0,
     }
     for s in samples_dict:
         sample = Sample.from_dict(s)
+        response_text = sample.response or ""
+        non_printing_chars = count_non_printing_chars(response_text)
         summary["total"] += 1
         if sample.status == Sample.Status.TRUNCATED:
             summary["truncated"] += 1
@@ -143,6 +149,10 @@ def summarize_rollout_samples(rollout_path: str, stop_token_ids: list[int] | Non
             summary["empty"] += 1
         if _sample_is_eos_only(sample, stop_token_ids_set):
             summary["eos_only"] += 1
+        summary["response_chars"] += len(response_text)
+        summary["non_printing_chars"] += non_printing_chars
+        if non_printing_chars > 0:
+            summary["non_printing_samples"] += 1
     return summary
 
 

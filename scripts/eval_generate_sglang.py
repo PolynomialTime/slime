@@ -5,8 +5,19 @@ import argparse
 import asyncio
 import json
 import logging
-import aiohttp
+import sys
 import time
+from pathlib import Path
+
+import aiohttp
+
+# Support direct execution via `python3 scripts/*.py` by making the repo root
+# importable before loading sibling package modules.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from slime.utils.text_hygiene import count_non_printing_chars, strip_non_printing_chars, summarize_non_printing_chars
 
 
 def parse_hh_rlhf_text(text: str) -> list[dict]:
@@ -172,10 +183,40 @@ async def run(args):
 
     elapsed = time.time() - t0
     responses = [record["text"] for record in response_records]
+    non_printing_rows_raw = 0
+    non_printing_chars_raw = 0
+    sanitized_records = []
+    sanitize_budget = 3
+    for raw_prompt, record in zip(raw_prompts, response_records, strict=True):
+        raw_text = record["text"]
+        non_printing_count = count_non_printing_chars(raw_text)
+        if non_printing_count:
+            non_printing_rows_raw += 1
+            non_printing_chars_raw += non_printing_count
+            if sanitize_budget > 0:
+                logger.warning(
+                    "Sanitizing non-printing characters from eval output prompt_tail=%r summary=%s",
+                    str(raw_prompt)[-160:],
+                    summarize_non_printing_chars(raw_text),
+                )
+                sanitize_budget -= 1
+        record = dict(record)
+        record["text_raw"] = raw_text
+        record["text"] = strip_non_printing_chars(raw_text)
+        sanitized_records.append(record)
+    response_records = sanitized_records
+    responses = [record["text"] for record in response_records]
     empty_count = sum(response_is_empty(r) for r in responses)
     eos_only_count = sum(response_is_eos_only(record["text"], record["response_tokens"]) for record in response_records)
     user_prefix_count = sum(response_has_user_prefix(r) for r in responses)
     assistant_prefix_count = sum(response_has_assistant_prefix(r) for r in responses)
+    if non_printing_rows_raw:
+        logger.warning(
+            "Sanitized non-printing characters from %d/%d eval rows (%d chars total)",
+            non_printing_rows_raw,
+            len(responses),
+            non_printing_chars_raw,
+        )
     if empty_count:
         logger.warning("Received %d empty completions out of %d", empty_count, len(responses))
     if eos_only_count or user_prefix_count or assistant_prefix_count:

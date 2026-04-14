@@ -29,9 +29,17 @@ NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-336}
 REWARD_TRAIN_SYNTH_PATH=${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl}
 REWARD_EVAL_PATH=${REWARD_EVAL_PATH:-}
 REWARD_EVAL_TARGET_PATH=${REWARD_EVAL_TARGET_PATH:-}
+REWARD_EVAL_REJECTED_KEY=${REWARD_EVAL_REJECTED_KEY:-}
 REWARD_EVAL_HOLDOUT_RATIO=${REWARD_EVAL_HOLDOUT_RATIO:-0.1}
-REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-200}
+REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-0}
+REWARD_EVAL_SHUFFLE_SEED=${REWARD_EVAL_SHUFFLE_SEED:-42}
+REWARD_EVAL_BATCH_SIZE=${REWARD_EVAL_BATCH_SIZE:-32}
 REWARD_UPDATE_BATCH_SIZE=${REWARD_UPDATE_BATCH_SIZE:-4}
+REWARD_UPDATE_EPOCHS=${REWARD_UPDATE_EPOCHS:-1}
+REWARD_STATIC_PREF_PATH=${REWARD_STATIC_PREF_PATH:-$ULTRAFEEDBACK_DIR/uf-train-prefs.jsonl}
+REWARD_STATIC_PREF_WEIGHT=${REWARD_STATIC_PREF_WEIGHT:-1.0}
+REWARD_ONLINE_PREF_WEIGHT=${REWARD_ONLINE_PREF_WEIGHT:-1.0}
+REWARD_STATIC_PREF_BATCH_SIZE=${REWARD_STATIC_PREF_BATCH_SIZE:-$REWARD_UPDATE_BATCH_SIZE}
 
 if [ ! -f "$REWARD_TRAIN_SYNTH_PATH" ]; then
   echo "ERROR: missing synthetic reward train data at $REWARD_TRAIN_SYNTH_PATH" >&2
@@ -48,6 +56,16 @@ if [ -n "$REWARD_EVAL_TARGET_PATH" ] && [ ! -f "$REWARD_EVAL_TARGET_PATH" ]; the
   exit 1
 fi
 
+if [ -n "$REWARD_STATIC_PREF_PATH" ] && [ ! -f "$REWARD_STATIC_PREF_PATH" ]; then
+  echo "ERROR: missing static reward preference data at $REWARD_STATIC_PREF_PATH" >&2
+  exit 1
+fi
+
+REWARD_EVAL_MAX_SAMPLES_JSON=$REWARD_EVAL_MAX_SAMPLES
+if [ -z "$REWARD_EVAL_MAX_SAMPLES_JSON" ] || [ "$REWARD_EVAL_MAX_SAMPLES_JSON" -le 0 ]; then
+  REWARD_EVAL_MAX_SAMPLES_JSON=null
+fi
+
 REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
 mkdir -p $REWARD_DIR
 
@@ -60,7 +78,14 @@ cat > $ARGS_JSON <<EOF
   "reward_demo_path": "$REWARD_TRAIN_SYNTH_PATH",
   "reward_demo_prompt_key": "text",
   "reward_demo_answer_key": "chosen",
-  "reward_update_epochs": 2,
+  "reward_static_pref_path": "$REWARD_STATIC_PREF_PATH",
+  "reward_static_pref_prompt_key": "text",
+  "reward_static_pref_chosen_key": "chosen",
+  "reward_static_pref_rejected_key": "rejected",
+  "reward_static_pref_weight": $REWARD_STATIC_PREF_WEIGHT,
+  "reward_online_pref_weight": $REWARD_ONLINE_PREF_WEIGHT,
+  "reward_static_pref_batch_size": $REWARD_STATIC_PREF_BATCH_SIZE,
+  "reward_update_epochs": $REWARD_UPDATE_EPOCHS,
   "reward_update_batch_size": $REWARD_UPDATE_BATCH_SIZE,
   "reward_update_lr": 1e-6,
   "c_coef_init": 0.5,
@@ -76,16 +101,18 @@ cat > $ARGS_JSON <<EOF
   "reward_eval_path": "$REWARD_EVAL_PATH",
   "reward_eval_prompt_key": "text",
   "reward_eval_chosen_key": "chosen",
+  "reward_eval_rejected_key": "$REWARD_EVAL_REJECTED_KEY",
   "reward_eval_target_path": "$REWARD_EVAL_TARGET_PATH",
   "reward_eval_target_prompt_key": "prompt",
   "reward_eval_target_answer_key": "response",
   "reward_eval_holdout_ratio": $REWARD_EVAL_HOLDOUT_RATIO,
-  "reward_eval_max_samples": $REWARD_EVAL_MAX_SAMPLES,
-  "reward_eval_batch_size": 32
+  "reward_eval_max_samples": $REWARD_EVAL_MAX_SAMPLES_JSON,
+  "reward_eval_shuffle_seed": $REWARD_EVAL_SHUFFLE_SEED,
+  "reward_eval_batch_size": $REWARD_EVAL_BATCH_SIZE
 }
 EOF
 
-echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END, batch=$REWARD_UPDATE_BATCH_SIZE, log=$RUN_LOG) ==="
+echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END, batch=$REWARD_UPDATE_BATCH_SIZE, static_batch=$REWARD_STATIC_PREF_BATCH_SIZE, log=$RUN_LOG) ==="
 
 TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG:-DETAIL} \
 PYTHONFAULTHANDLER=1 \

@@ -5,6 +5,7 @@ set -ex
 
 SLIME=/mnt/shared-storage-gpfs2/wangqianyi2/slime
 cd $SLIME
+export PYTHONPATH="$SLIME${PYTHONPATH:+:$PYTHONPATH}"
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
 SFT_SYNTH_FULL_DATA_PATH=${SFT_SYNTH_FULL_DATA_PATH:-${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.jsonl}}
@@ -15,17 +16,40 @@ SFT_WARMUP_DATA_PATH=${SFT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-syn
 SFT_WARMUP_REPORT_PATH=${SFT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth-warmup${SFT_WARMUP_SAMPLES}.report.json}
 
 KEEP_ALL_ROUND_CHECKPOINTS=${KEEP_ALL_ROUND_CHECKPOINTS:-0}
-EVAL_TEMPERATURE=${EVAL_TEMPERATURE:-0.2}
+EVAL_TEMPERATURE=${EVAL_TEMPERATURE:-0.0}
 MIN_FREE_DISK_GB=${MIN_FREE_DISK_GB:-}
 MIN_FREE_DISK_GB_PPO=${MIN_FREE_DISK_GB_PPO:-${MIN_FREE_DISK_GB:-60}}
 MIN_FREE_DISK_GB_EXPORT=${MIN_FREE_DISK_GB_EXPORT:-${MIN_FREE_DISK_GB:-30}}
 START_ROUND=${START_ROUND:-1}
 FROM_SCRATCH=${FROM_SCRATCH:-0}
 SFT_NUM_EPOCHS=${SFT_NUM_EPOCHS:-1}
-NUM_ROUNDS=7
-NUM_ROLLOUT_PER_ROUND=150
+NUM_ROUNDS=${NUM_ROUNDS:-7}
+NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-75}
 BOOTSTRAP_NUM_ROLLOUT=${BOOTSTRAP_NUM_ROLLOUT:-$NUM_ROLLOUT_PER_ROUND}
 BOOTSTRAP_ROLLOUT_TEMPERATURE=${BOOTSTRAP_ROLLOUT_TEMPERATURE:-0.7}
+ROLLOUT_MAX_RESPONSE_LEN=${ROLLOUT_MAX_RESPONSE_LEN:-768}
+ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.2}
+ROLLOUT_HEALTH_MAX_TRUNCATED=${ROLLOUT_HEALTH_MAX_TRUNCATED:-0.2}
+PPO_START_FROM_SFT=${PPO_START_FROM_SFT:-0}
+# Round 1 still uses SFT as ref; later rounds default to previous round checkpoint.
+PPO_REF_FIXED_TO_SFT=${PPO_REF_FIXED_TO_SFT:-0}
+REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-0}
+REWARD_EVAL_SHUFFLE_SEED=${REWARD_EVAL_SHUFFLE_SEED:-42}
+REWARD_UPDATE_EPOCHS=${REWARD_UPDATE_EPOCHS:-1}
+# Online winrate judging must stay opt-in; GPU training runs on the cluster are offline.
+WINRATE_GATE_ENABLED=${WINRATE_GATE_ENABLED:-0}
+WINRATE_GATE_MAX_ROUND=${WINRATE_GATE_MAX_ROUND:-2}
+WINRATE_GATE_MAX_SAMPLES=${WINRATE_GATE_MAX_SAMPLES:-512}
+WINRATE_GATE_CONCURRENCY=${WINRATE_GATE_CONCURRENCY:-16}
+WINRATE_GATE_MIN=${WINRATE_GATE_MIN:-0.48}
+INTERROUND_WINRATE_GATE_MIN=${INTERROUND_WINRATE_GATE_MIN:-0.50}
+WINRATE_GATE_MODEL=${WINRATE_GATE_MODEL:-gpt-4o}
+WINRATE_GATE_API_KEY=${WINRATE_GATE_API_KEY:-${OPENAI_API_KEY:-${WINRATE_API_KEY:-}}}
+WINRATE_GATE_BASE_URL=${WINRATE_GATE_BASE_URL:-${OPENAI_BASE_URL:-${WINRATE_BASE_URL:-}}}
+WINRATE_GATE_FALLBACK_MODEL=${WINRATE_GATE_FALLBACK_MODEL:-claude-sonnet-4-6}
+WINRATE_GATE_FALLBACK_API_KEY=${WINRATE_GATE_FALLBACK_API_KEY:-${WINRATE_FALLBACK_API_KEY:-}}
+WINRATE_GATE_FALLBACK_BASE_URL=${WINRATE_GATE_FALLBACK_BASE_URL:-${WINRATE_FALLBACK_BASE_URL:-$WINRATE_GATE_BASE_URL}}
+CODEX_RULES_PATH=${CODEX_RULES_PATH:-/mnt/shared-storage-gpfs2/wangqianyi2/slime-autoresearch-notify/CODEX_HARD_RULES.md}
 TEST_DATA=$ULTRAFEEDBACK_DIR/uf-test.jsonl
 REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test-synth-prefs.jsonl}
 REWARD_EXTERNAL_EVAL_BATCH_SIZE=${REWARD_EXTERNAL_EVAL_BATCH_SIZE:-32}
@@ -51,13 +75,33 @@ if [ -z "$SFT_DATA_PATH" ]; then
   fi
 fi
 
-echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+
+write_codex_hard_rules() {
+  mkdir -p "$(dirname "$CODEX_RULES_PATH")"
+  cat > "$CODEX_RULES_PATH" <<'EOF'
+# CODEX HARD RULES
+
+## HARD RULE 1: FORBIDDEN TO MAKE TARGETED PATCHES
+
+- Forbidden: patching around a single character, a single sample type, a single prompt pattern, or a single evaluation artifact.
+- Required: every fix must be mechanism-level, distribution-wide, and generalizable.
+- If a proposal mainly exists to make one observed failure disappear, reject it and redesign the fix.
+EOF
+}
+
+write_codex_hard_rules
 
 ensure_synth_sft_full_data() {
-  if [ -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
-    return 0
-  fi
   local synth_input=$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl
+  if [ -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
+    # Rebuild if source is newer than derived file
+    if [ -f "$synth_input" ] && [ "$synth_input" -nt "$SFT_SYNTH_FULL_DATA_PATH" ]; then
+      echo "WARNING: $synth_input is newer than $SFT_SYNTH_FULL_DATA_PATH, rebuilding"
+    else
+      return 0
+    fi
+  fi
   if [ ! -f "$synth_input" ]; then
     echo "ERROR: missing synthetic train chosen data at $synth_input" >&2
     echo "ERROR: generate uf-train-synth-chosen.jsonl before running from synthetic SFT data." >&2
@@ -76,7 +120,12 @@ ensure_sft_warmup_data() {
   fi
   ensure_synth_sft_full_data
   if [ -f "$SFT_WARMUP_DATA_PATH" ] && [ "$(awk 'END {print NR}' "$SFT_WARMUP_DATA_PATH")" -eq "$SFT_WARMUP_SAMPLES" ]; then
-    return 0
+    # Rebuild if full data is newer than warmup subset
+    if [ "$SFT_SYNTH_FULL_DATA_PATH" -nt "$SFT_WARMUP_DATA_PATH" ]; then
+      echo "WARNING: $SFT_SYNTH_FULL_DATA_PATH is newer than $SFT_WARMUP_DATA_PATH, rebuilding warmup"
+    else
+      return 0
+    fi
   fi
   echo "===== Building synthetic SFT warmup subset ====="
   python3 scripts/sample_jsonl.py \
@@ -136,12 +185,7 @@ if [ -d "$SFT_HF_DIR" ] && [ -f "$SFT_HF_DIR/config.json" ] && [ -f "$SFT_MEGATR
   SKIP_SFT=1
 fi
 
-RESUME_PARTIAL_ROUND1=0
-if [ "$FROM_SCRATCH" -ne 1 ] && [ "$START_ROUND" -eq 1 ] && [ "$SKIP_SFT" -eq 1 ]; then
-  if [ -d "$SLIME/rollout" ] || [ -d "$REWARD_DIR" ] || [ -d "$SLIME/models/save_dir_r1" ]; then
-    RESUME_PARTIAL_ROUND1=1
-  fi
-fi
+RESUME_PARTIAL_ROUND1=${RESUME_PARTIAL_ROUND1:-0}
 
 SKIP_SFT_BASELINE=0
 if [ -f "$SFT_BASELINE" ] && [ "$(awk 'END {print NR}' "$SFT_BASELINE")" -ge "$EXPECTED_EVAL_LINES" ]; then
@@ -282,6 +326,183 @@ generate_with_sglang() {
     --concurrency 256
   kill $SGLANG_PID 2>/dev/null || true
   wait $SGLANG_PID 2>/dev/null || true
+}
+
+rollout_health_gate() {
+  local stage=$1
+  local rollout_end=$2
+  local window=$3
+  python3 - "$stage" "$SLIME/rollout" "$rollout_end" "$window" "$ROLLOUT_HEALTH_MAX_TRUNCATED" <<'PY'
+from pathlib import Path
+import sys
+
+from slime.local_rm.data import summarize_rollout_samples
+
+stage = sys.argv[1]
+rollout_dir = Path(sys.argv[2])
+rollout_end = int(sys.argv[3])
+window = int(sys.argv[4])
+max_truncated = float(sys.argv[5])
+start = max(0, rollout_end - window + 1)
+
+summary = {
+    "total": 0,
+    "empty": 0,
+    "eos_only": 0,
+    "truncated": 0,
+    "response_chars": 0,
+    "non_printing_chars": 0,
+    "non_printing_samples": 0,
+}
+missing = []
+for rollout_id in range(start, rollout_end + 1):
+    path = rollout_dir / f"rollout_{rollout_id}.pt"
+    if not path.exists():
+        missing.append(str(path))
+        continue
+    stats = summarize_rollout_samples(str(path))
+    for key in summary:
+        summary[key] += stats.get(key, 0)
+
+if missing:
+    print(f"{stage} rollout health missing files: {missing[:3]}")
+    raise SystemExit(1)
+
+total = summary["total"]
+if total <= 0:
+    print(f"{stage} rollout health found no samples")
+    raise SystemExit(1)
+
+truncated_ratio = summary["truncated"] / total
+empty_ratio = summary["empty"] / total
+eos_only_ratio = summary["eos_only"] / total
+non_printing_sample_ratio = summary["non_printing_samples"] / total
+non_printing_char_ratio = summary["non_printing_chars"] / max(summary["response_chars"], 1)
+
+print(
+    f"{stage} rollout health: total={total} truncated_ratio={truncated_ratio:.4f} "
+    f"empty_ratio={empty_ratio:.4f} eos_only_ratio={eos_only_ratio:.4f} "
+    f"non_printing_sample_ratio={non_printing_sample_ratio:.4f} "
+    f"non_printing_char_ratio={non_printing_char_ratio:.6f}"
+)
+
+issues = []
+if truncated_ratio > max_truncated:
+    issues.append(f"truncated_ratio={truncated_ratio:.4f} > {max_truncated:.4f}")
+if issues:
+    print(f"{stage} rollout gate failed: {'; '.join(issues)}")
+    raise SystemExit(1)
+PY
+}
+
+eval_output_hygiene_gate() {
+  local round=$1
+  local output_path=$2
+  python3 - "$round" "$output_path" <<'PY'
+import json
+import sys
+
+from slime.utils.text_hygiene import count_non_printing_chars
+
+round_id = sys.argv[1]
+path = sys.argv[2]
+total = 0
+empty = 0
+non_printing_rows = 0
+non_printing_chars = 0
+with open(path, encoding="utf-8") as f:
+    for line in f:
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        text = row.get("response", "")
+        total += 1
+        if not str(text).strip():
+            empty += 1
+        count = count_non_printing_chars(text)
+        non_printing_chars += count
+        if count > 0:
+            non_printing_rows += 1
+
+print(
+    f"Round {round_id} eval hygiene: total={total} empty={empty} "
+    f"non_printing_rows={non_printing_rows} non_printing_chars={non_printing_chars}"
+)
+if total <= 0 or non_printing_rows > 0:
+    raise SystemExit(1)
+PY
+}
+
+run_blind_winrate_eval() {
+  local outputs_a=$1
+  local outputs_b=$2
+  local output_json=$3
+  local label=$4
+  local min_winrate=$5
+  mkdir -p "$SLIME/eval_winrate"
+  local run_eval=1
+  if [ -f "$output_json" ] && [ "$output_json" -nt "$outputs_a" ] && [ "$output_json" -nt "$outputs_b" ]; then
+    run_eval=0
+  fi
+  if [ "$run_eval" -eq 1 ]; then
+    python3 scripts/eval_winrate.py \
+      --outputs-a "$outputs_a" \
+      --outputs-b "$outputs_b" \
+      --output "$output_json" \
+      --mode blind \
+      --api-key "$WINRATE_GATE_API_KEY" \
+      --base-url "$WINRATE_GATE_BASE_URL" \
+      --model "$WINRATE_GATE_MODEL" \
+      --fallback-model "$WINRATE_GATE_FALLBACK_MODEL" \
+      --fallback-api-key "$WINRATE_GATE_FALLBACK_API_KEY" \
+      --fallback-base-url "$WINRATE_GATE_FALLBACK_BASE_URL" \
+      --concurrency "$WINRATE_GATE_CONCURRENCY" \
+      --max-samples "$WINRATE_GATE_MAX_SAMPLES"
+  else
+    echo "Skipping blind winrate eval for $label: found current $output_json"
+  fi
+  python3 - "$output_json" "$label" "$min_winrate" <<'PY'
+import json
+import sys
+
+path, label, threshold = sys.argv[1], sys.argv[2], float(sys.argv[3])
+data = json.load(open(path, encoding="utf-8"))
+winrate = float(data["winrate_a"])
+print(
+    f"{label}: winrate_a={winrate:.4f} a_wins={data['a_wins']} "
+    f"b_wins={data['b_wins']} ties={data['ties']} total={data['total']}"
+)
+if winrate < threshold:
+    raise SystemExit(1)
+PY
+}
+
+round_smoke_gates() {
+  local round=$1
+  local round_output=$2
+  eval_output_hygiene_gate "$round" "$round_output"
+  if [ "$WINRATE_GATE_ENABLED" -ne 1 ] || [ "$round" -gt "$WINRATE_GATE_MAX_ROUND" ]; then
+    return 0
+  fi
+
+  run_blind_winrate_eval \
+    "$round_output" \
+    "$SFT_BASELINE" \
+    "$SLIME/eval_winrate/winrate_r${round}_vs_sft.json" \
+    "Round $round blind winrate vs SFT" \
+    "$WINRATE_GATE_MIN"
+
+  if [ "$round" -ge 2 ]; then
+    local prev_round_output=$SLIME/eval/outputs_policy_r$((round - 1)).jsonl
+    if [ -f "$prev_round_output" ]; then
+      run_blind_winrate_eval \
+        "$round_output" \
+        "$prev_round_output" \
+        "$SLIME/eval_winrate/winrate_r${round}_vs_r$((round - 1)).json" \
+        "Round $round blind winrate vs Round $((round - 1))" \
+        "$INTERROUND_WINRATE_GATE_MIN"
+    fi
+  fi
 }
 
 round_train_complete() {
@@ -457,10 +678,8 @@ prune_stale_checkpoints() {
     rm -rf "$reward_step_dir"
   done
 
-  if [ "$current_round" -ge 1 ] && [ -d "$SFT_MEGATRON_DIR" ]; then
-    echo "Pruning SFT Megatron checkpoint $SFT_MEGATRON_DIR after round $current_round export completed"
-    rm -rf "$SFT_MEGATRON_DIR"
-  fi
+  # SFT Megatron checkpoint is a long-lived asset needed for Round 1 ref/resume.
+  # Do not prune it here; only delete at the very end of the pipeline if desired.
 }
 
 # ============ Generate SFT baseline outputs (for offline winrate comparison) ============
@@ -488,6 +707,7 @@ if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null 
   ALIGN_ROLLOUT_WITH_SFT=1 \
   DEBUG_ROLLOUT_ONLY=1 \
   ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE \
+  ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
   TB_EXP_NAME=bootstrap \
   bash scripts/run-irl-prod.sh
 
@@ -502,6 +722,8 @@ if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null 
 else
   echo "Rollout data already exists, skipping bootstrap"
 fi
+
+rollout_health_gate "bootstrap" $(( BOOTSTRAP_NUM_ROLLOUT - 1 )) "$BOOTSTRAP_NUM_ROLLOUT"
 
 # ============ Rounds 1-7 ============
 PREV_SAVE_DIR=""
@@ -531,12 +753,13 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     if ! round_output_complete "$ROUND"; then
       echo "Round $ROUND test-set output missing; exporting now"
       check_disk_space "round${ROUND}-pre-export" "$SLIME/models" "$MIN_FREE_DISK_GB_EXPORT"
-      KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
+      EVAL_TEMPERATURE=$EVAL_TEMPERATURE KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
     fi
     if ! round_output_complete "$ROUND"; then
       echo "ERROR: round $ROUND output generation failed or is incomplete: $ROUND_OUTPUT"
       exit 1
     fi
+    round_smoke_gates "$ROUND" "$ROUND_OUTPUT"
     if ! round_external_eval_complete "$ROUND"; then
       echo "Round $ROUND external reward eval missing; running now"
       run_external_reward_eval "$ROUND"
@@ -570,7 +793,10 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     REWARD_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH \
     REWARD_EVAL_REJECTED_KEY=rejected \
     REWARD_EVAL_TARGET_PATH= \
+    REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES \
+    REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED \
     REWARD_EVAL_BATCH_SIZE=$REWARD_EXTERNAL_EVAL_BATCH_SIZE \
+    REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS \
     bash scripts/run-reward-update.sh
   fi
 
@@ -586,7 +812,9 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
 
   rm -rf $ROUND_SAVE_DIR /tmp/critic_ckpt 2>/dev/null || true
 
-  if [ "$ROUND" -eq 1 ]; then
+  if [ "$PPO_REF_FIXED_TO_SFT" -eq 1 ]; then
+    ROUND_REF_CKPT=$SFT_MEGATRON_DIR
+  elif [ "$ROUND" -eq 1 ]; then
     ROUND_REF_CKPT=$SFT_MEGATRON_DIR
   else
     if [ -z "$PREV_SAVE_DIR" ] || [ ! -d "$PREV_SAVE_DIR" ]; then
@@ -596,18 +824,26 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     ROUND_REF_CKPT=$PREV_SAVE_DIR
   fi
 
+  ROUND_ACTOR_LOAD=""
+  if [ "$PPO_START_FROM_SFT" -ne 1 ]; then
+    ROUND_ACTOR_LOAD=$PREV_SAVE_DIR
+  fi
+
   MODEL_SH=scripts/models/qwen3-8B.sh \
   HF_CKPT=$SFT_HF_DIR \
   REF_CKPT=$ROUND_REF_CKPT \
   SAVE_DIR=$ROUND_SAVE_DIR \
-  ACTOR_LOAD=$PREV_SAVE_DIR \
+  ACTOR_LOAD=$ROUND_ACTOR_LOAD \
   PROMPT_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   DEMO_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND \
   ALIGN_ROLLOUT_WITH_SFT=1 \
-  ROLLOUT_TEMPERATURE=0.2 \
+  ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE \
+  ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
   TB_EXP_NAME=round${ROUND} \
   bash scripts/run-irl-prod.sh
+
+  rollout_health_gate "round${ROUND}" $(( NUM_ROLLOUT_PER_ROUND - 1 )) "$NUM_ROLLOUT_PER_ROUND"
 
   echo "=== Killing PPO processes before test-set export ==="
   pkill -9 sglang || true
@@ -618,11 +854,12 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
 
   check_disk_space "round${ROUND}-pre-export" "$SLIME/models" "$MIN_FREE_DISK_GB_EXPORT"
   echo "===== Round $ROUND: Exporting test-set outputs ====="
-  KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
+  EVAL_TEMPERATURE=$EVAL_TEMPERATURE KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
   if ! round_output_complete "$ROUND"; then
     echo "ERROR: round $ROUND output generation failed or is incomplete: $ROUND_OUTPUT"
     exit 1
   fi
+  round_smoke_gates "$ROUND" "$ROUND_OUTPUT"
   rm -rf "$ROUND_POLICY_HF"
   run_external_reward_eval "$ROUND"
 
@@ -691,7 +928,7 @@ try:
     clipfrac = metrics.get('train/pg_clipfrac', {}).get('last', 0)
     critic_grad = metrics.get('train/critic-grad_norm', {}).get('max', 0)
     critic_clipfrac = metrics.get('train/critic-value_clipfrac', {}).get('last', 0)
-    if truncated > 0.5: issues.append(f'HIGH TRUNCATION {truncated:.2f} (increase max_response_len)')
+    if truncated > ${ROLLOUT_HEALTH_MAX_TRUNCATED}: issues.append(f'HIGH TRUNCATION {truncated:.2f} (increase max_response_len)')
     if empty_rate > 0.1: issues.append(f'HIGH EMPTY RATE {empty_rate:.2f}')
     if eos_only_rate > 0.1: issues.append(f'HIGH EOS-ONLY RATE {eos_only_rate:.2f}')
     if user_prefix_rate > 0.05: issues.append(f'HIGH USER PREFIX RATE {user_prefix_rate:.2f}')

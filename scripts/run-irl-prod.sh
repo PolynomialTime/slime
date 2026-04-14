@@ -41,19 +41,27 @@ PROMPT_DATA=${PROMPT_DATA:-"/path/to/prompt.jsonl"}
 DEMO_DATA=${DEMO_DATA:-"/path/to/demo.jsonl"}
 SLIME_ROOT=${SLIME_ROOT:-$(dirname "$SCRIPT_DIR")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-336}
+PPO_SAVE_INTERVAL=${PPO_SAVE_INTERVAL:-$NUM_ROLLOUT}
 ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-128}
-ROLLOUT_MAX_RESPONSE_LEN=${ROLLOUT_MAX_RESPONSE_LEN:-384}
+ROLLOUT_MAX_RESPONSE_LEN=${ROLLOUT_MAX_RESPONSE_LEN:-768}
 ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.0}
 GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-64}
 ALIGN_ROLLOUT_WITH_SFT=${ALIGN_ROLLOUT_WITH_SFT:-0}
 DEBUG_ROLLOUT_ONLY=${DEBUG_ROLLOUT_ONLY:-0}
-ACTOR_LR=${ACTOR_LR:-5e-6}
+ACTOR_LR=${ACTOR_LR:-2e-6}
 CRITIC_LR=${CRITIC_LR:-5e-6}
 CRITIC_LR_WARMUP_ITERS=${CRITIC_LR_WARMUP_ITERS:-10}
 CLIP_GRAD=${CLIP_GRAD:-0.5}
 CRITIC_CLIP_GRAD=${CRITIC_CLIP_GRAD:-10.0}
 MAX_TOKENS_PER_GPU=${MAX_TOKENS_PER_GPU:-6144}
 KL_LOSS_COEF=${KL_LOSS_COEF:-0.10}
+REWARD_MODEL_DIR=${REWARD_MODEL_DIR:-${SLIME_ROOT}/models/reward_model}
+CRITIC_SAVE_DIR=${CRITIC_SAVE_DIR:-/tmp/critic_ckpt}
+ROLLOUT_DEBUG_DIR=${ROLLOUT_DEBUG_DIR:-${SLIME_ROOT}/rollout}
+ROLLOUT_DEBUG_PATH_TEMPLATE=${ROLLOUT_DEBUG_PATH_TEMPLATE:-}
+if [ -z "${ROLLOUT_DEBUG_PATH_TEMPLATE}" ]; then
+  ROLLOUT_DEBUG_PATH_TEMPLATE="${ROLLOUT_DEBUG_DIR}/rollout_{rollout_id}.pt"
+fi
 
 if [ "${ALIGN_ROLLOUT_WITH_SFT}" = "1" ]; then
   # Qwen chat-template boundaries: stop on end-of-turn, next-turn start, or end-of-text.
@@ -75,8 +83,8 @@ CKPT_ARGS=(
    --finetune
    --no-save-optim
    --save ${SAVE_DIR}
-   --critic-save /tmp/critic_ckpt
-   --save-interval ${NUM_ROLLOUT}
+   --critic-save ${CRITIC_SAVE_DIR}
+   --save-interval ${PPO_SAVE_INTERVAL}
 )
 if [ -n "$ACTOR_LOAD" ] && [ -d "$ACTOR_LOAD" ]; then
   CKPT_ARGS+=(--load ${ACTOR_LOAD})
@@ -121,9 +129,9 @@ PPO_ARGS=(
 
 IRL_ARGS=(
    --custom-rm-path slime.local_rm.custom_rm.custom_rm
-   --reward-model-dir ${SLIME_ROOT}/models/reward_model
+   --reward-model-dir ${REWARD_MODEL_DIR}
    --reward-update-interval 999999
-   --save-debug-rollout-data ${SLIME_ROOT}/rollout/rollout_{rollout_id}.pt
+   --save-debug-rollout-data ${ROLLOUT_DEBUG_PATH_TEMPLATE}
 )
 
 PERF_ARGS=(
@@ -187,7 +195,10 @@ if [ "${DEBUG_ROLLOUT_ONLY}" = "1" ]; then
   RUN_PPO_ARGS=()
 fi
 
+mkdir -p "${SAVE_DIR}" "${CRITIC_SAVE_DIR}" "$(dirname "${ROLLOUT_DEBUG_PATH_TEMPLATE}")"
+
 echo "Effective rollout config: num_rollout=${NUM_ROLLOUT} batch=${ROLLOUT_BATCH_SIZE} max_new_tokens=${ROLLOUT_MAX_RESPONSE_LEN} temperature=${ROLLOUT_TEMPERATURE} align_with_sft=${ALIGN_ROLLOUT_WITH_SFT} stop_token_ids=${ROLLOUT_STOP_TOKEN_IDS[*]} debug_rollout_only=${DEBUG_ROLLOUT_ONLY} use_ppo_args=$([ \"${DEBUG_ROLLOUT_ONLY}\" = \"1\" ] && echo 0 || echo 1)"
+echo "Effective checkpoint config: hf_ckpt=${HF_CKPT} actor_load=${ACTOR_LOAD:-<none>} ref_ckpt=${REF_CKPT} reward_model_dir=${REWARD_MODEL_DIR} save_dir=${SAVE_DIR} critic_save_dir=${CRITIC_SAVE_DIR} rollout_debug_path=${ROLLOUT_DEBUG_PATH_TEMPLATE} save_interval=${PPO_SAVE_INTERVAL} tb_experiment=${TB_EXP_NAME:-prod}"
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export _REAL_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"

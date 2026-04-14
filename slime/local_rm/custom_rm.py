@@ -8,6 +8,8 @@ import threading
 import time
 import queue
 
+from slime.utils.text_hygiene import count_non_printing_chars, non_printing_char_ratio
+
 logger = logging.getLogger(__name__)
 
 _QUEUE = queue.Queue()
@@ -38,6 +40,9 @@ def _parse_env_float(name: str, default: float) -> float:
         return default
 
 
+_NON_PRINTING_COUNT_THRESHOLD = int(os.environ.get("SLIME_NON_PRINTING_COUNT_THRESHOLD", "8"))
+_NON_PRINTING_RATIO_THRESHOLD = _parse_env_float("SLIME_NON_PRINTING_RATIO_THRESHOLD", 0.02)
+_NON_PRINTING_PENALTY_MAX = _parse_env_float("SLIME_NON_PRINTING_PENALTY_MAX", 5.0)
 _IDLE_TIMEOUT_SEC = max(0.0, _parse_env_float("SLIME_CUSTOM_RM_IDLE_TIMEOUT_SEC", 0.0))
 
 
@@ -353,6 +358,17 @@ def _apply_reward_shaping(reward, sample):
         reward -= _HUMAN_CONTINUATION_PENALTY
     if response_text.lstrip().startswith("Assistant:"):
         reward -= _ASSISTANT_PREFIX_PENALTY
+
+    # Generic hygiene penalty for outputs dominated by non-printing characters.
+    non_printing_count = count_non_printing_chars(response_text)
+    if non_printing_count:
+        non_printing_ratio = non_printing_char_ratio(response_text)
+        if non_printing_count >= _NON_PRINTING_COUNT_THRESHOLD or non_printing_ratio >= _NON_PRINTING_RATIO_THRESHOLD:
+            severity = max(
+                non_printing_count / max(_NON_PRINTING_COUNT_THRESHOLD, 1),
+                non_printing_ratio / max(_NON_PRINTING_RATIO_THRESHOLD, 1e-6),
+            )
+            reward -= min(_NON_PRINTING_PENALTY_MAX, severity)
 
     # Repetition penalty (4-gram)
     words = response_text.split()

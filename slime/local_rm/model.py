@@ -176,8 +176,20 @@ def init_reward_model(base_model: str, reward_model_path: str | None):
             base_config.tie_word_embeddings = False
         model = ScalarModel(cfg)
         weights_path = os.path.join(reward_model_path, "pytorch_model.bin")
+        index_path = os.path.join(reward_model_path, "pytorch_model.bin.index.json")
         if os.path.exists(weights_path):
             state_dict = torch.load(weights_path, map_location="cpu", weights_only=False)
+        elif os.path.exists(index_path):
+            with open(index_path) as idx_f:
+                index = json.load(idx_f)
+            shard_files = sorted(set(index["weight_map"].values()))
+            state_dict = {}
+            for shard in shard_files:
+                shard_path = os.path.join(reward_model_path, shard)
+                state_dict.update(torch.load(shard_path, map_location="cpu", weights_only=False))
+        else:
+            state_dict = None
+        if state_dict is not None:
             # Check if model has meta tensors
             has_meta = any(p.is_meta for p in model.parameters())
             if has_meta:

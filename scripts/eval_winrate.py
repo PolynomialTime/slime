@@ -29,6 +29,9 @@ from tqdm.asyncio import tqdm as async_tqdm
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+MAX_JUDGE_ATTEMPTS = 24
+MAX_UNPARSEABLE_VERDICTS = 8
+
 
 def extract_verdict_text(resp: Any) -> str:
     if hasattr(resp, "choices"):
@@ -54,6 +57,34 @@ def is_content_filter_error(exc: Exception) -> bool:
         return True
     message = str(exc).lower()
     return "content_filter" in message or "content management policy" in message
+
+
+def get_error_message(exc: Exception) -> str:
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error", {})
+        message = err.get("message")
+        if message:
+            return str(message)
+    return str(exc)
+
+
+def is_repeat_failed_request_error(exc: Exception) -> bool:
+    message = get_error_message(exc)
+    lowered = message.lower()
+    return (
+        "same request has failed before" in lowered
+        or "相同的请求之前已经失败" in message
+    )
+
+
+def add_retry_nonce(content: str, nonce: int) -> str:
+    if nonce <= 0:
+        return content
+    return (
+        f"{content}\n\n"
+        f"[Retry nonce {nonce}. This line is metadata for transport retries only; ignore it when judging.]"
+    )
 
 JUDGE_SYSTEM = (
     "You are an impartial judge evaluating AI assistant responses. "
@@ -129,8 +160,11 @@ async def judge_pair(
     async with semaphore:
         active_client = client
         active_model = model
+        active_content = content
         using_fallback = False
         attempt = 0
+        unparseable_count = 0
+        retry_nonce = 0
         while True:
             attempt += 1
             try:
@@ -138,7 +172,7 @@ async def judge_pair(
                     model=active_model,
                     messages=[
                         {"role": "system", "content": JUDGE_SYSTEM},
-                        {"role": "user", "content": content},
+                        {"role": "user", "content": active_content},
                     ],
                     max_completion_tokens=4,
                     temperature=0.0,
@@ -168,6 +202,14 @@ async def judge_pair(
                 m = re.search(r'\b(?:ANSWER|VERDICT)[:\s]+([AB])\b', verdict_text)
                 if m:
                     return m.group(1), verdict, False
+                unparseable_count += 1
+                if unparseable_count >= MAX_UNPARSEABLE_VERDICTS:
+                    logger.error(
+                        "giving up after %d unparseable verdicts; marking sample as parse_error: %r",
+                        unparseable_count,
+                        verdict,
+                    )
+                    return "Tie", verdict, True
                 delay_s = min(30, max(1, attempt // 5))
                 logger.warning(
                     "unparseable verdict on attempt %d, retrying in %ss: %r",
@@ -196,6 +238,26 @@ async def judge_pair(
                     raise RuntimeError(
                         "judge request blocked by content filter and no fallback judge is configured"
                     ) from e
+                if is_repeat_failed_request_error(e):
+                    retry_nonce += 1
+                    active_content = add_retry_nonce(content, retry_nonce)
+                    delay_s = min(5, retry_nonce)
+                    logger.warning(
+                        "judge request hit repeat-failed cache on attempt %d; varying payload and retrying in %ss: %s",
+                        attempt,
+                        delay_s,
+                        get_error_message(e),
+                    )
+                    await asyncio.sleep(delay_s)
+                    continue
+                if attempt >= MAX_JUDGE_ATTEMPTS:
+                    message = get_error_message(e)
+                    logger.error(
+                        "giving up after %d failed judge attempts; marking sample as parse_error: %s",
+                        attempt,
+                        message,
+                    )
+                    return "Tie", f"ERROR: {message}", True
                 delay_s = min(30, 2 ** min(attempt - 1, 4))
                 logger.warning(
                     "judge request failed on attempt %d, retrying in %ss: %s",
@@ -240,6 +302,46 @@ def build_reference_prompt(prompt: str, reference: str, response_a: str, respons
         response_a=response_a,
         response_b=response_b,
     )
+
+
+def build_output_sample(
+    *,
+    index: int,
+    prompt: str,
+    response_a: str,
+    response_b: str,
+    swapped: bool,
+    verdict: str,
+    raw_verdict: str,
+    parse_error: bool,
+    winner: str,
+    judge_source: str,
+    reference: str | None = None,
+    fast_path_signature: str | None = None,
+) -> dict:
+    sample = {
+        "index": index,
+        "prompt": prompt,
+        "prompt_len": len(prompt),
+        "response_a": response_a,
+        "response_a_len": len(response_a),
+        "response_b": response_b,
+        "response_b_len": len(response_b),
+        "responses_exact_match": response_a == response_b,
+        "responses_strip_match": response_a.strip() == response_b.strip(),
+        "swapped": swapped,
+        "verdict": verdict,
+        "raw_verdict": raw_verdict,
+        "parse_error": parse_error,
+        "winner": winner,
+        "judge_source": judge_source,
+    }
+    if reference is not None:
+        sample["reference"] = reference
+        sample["reference_len"] = len(reference)
+    if fast_path_signature is not None:
+        sample["fast_path_signature"] = fast_path_signature
+    return sample
 
 
 def leading_answer_segment(text: str) -> str:
@@ -464,20 +566,20 @@ async def run(args):
             )
             if fast_result is not None:
                 fast_result["index"] = i
-                results_by_index[i] = {
-                    "index": i,
-                    "prompt": prompt[:200],
-                    "response_a": resp_a[:200],
-                    "response_b": resp_b[:200],
-                    "reference": reference[:200],
-                    "swapped": fast_result["swapped"],
-                    "verdict": fast_result["verdict"],
-                    "raw_verdict": fast_result["raw_verdict"],
-                    "parse_error": fast_result["parse_error"],
-                    "winner": fast_result["winner"],
-                    "judge_source": fast_result["judge_source"],
-                    "fast_path_signature": fast_result["fast_path_signature"],
-                }
+                results_by_index[i] = build_output_sample(
+                    index=i,
+                    prompt=prompt,
+                    response_a=resp_a,
+                    response_b=resp_b,
+                    reference=reference,
+                    swapped=fast_result["swapped"],
+                    verdict=fast_result["verdict"],
+                    raw_verdict=fast_result["raw_verdict"],
+                    parse_error=fast_result["parse_error"],
+                    winner=fast_result["winner"],
+                    judge_source=fast_result["judge_source"],
+                    fast_path_signature=fast_result["fast_path_signature"],
+                )
                 continue
 
         model_jobs.append(build_model_job(i, prompt, resp_a, resp_b, reference, args.mode))
@@ -504,21 +606,19 @@ async def run(args):
             else:
                 winner = "a" if verdict == "A" else "b"
 
-            sample = {
-                "index": job["index"],
-                "prompt": job["prompt"][:200],
-                "response_a": job["response_a"][:200],
-                "response_b": job["response_b"][:200],
-                "swapped": job["swapped"],
-                "verdict": verdict,
-                "raw_verdict": raw_verdict,
-                "parse_error": parse_error,
-                "winner": winner,
-                "judge_source": "model",
-            }
-            if job["reference"] is not None:
-                sample["reference"] = job["reference"][:200]
-            return sample
+            return build_output_sample(
+                index=job["index"],
+                prompt=job["prompt"],
+                response_a=job["response_a"],
+                response_b=job["response_b"],
+                reference=job["reference"],
+                swapped=job["swapped"],
+                verdict=verdict,
+                raw_verdict=raw_verdict,
+                parse_error=parse_error,
+                winner=winner,
+                judge_source="model",
+            )
 
         model_results = await async_tqdm.gather(*(eval_one(job) for job in model_jobs), desc="judging")
         for sample in model_results:

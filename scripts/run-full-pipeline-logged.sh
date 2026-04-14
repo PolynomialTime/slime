@@ -12,7 +12,34 @@ RUN_ENV=$PIPELINE_LOG_DIR/${PIPELINE_RUN_TAG}.env
 
 mkdir -p "$PIPELINE_LOG_DIR"
 
-cat > "$RUN_ENV" <<EOF
+TRACKED_ENV_KEYS=(
+  NUM_ROUNDS
+  NUM_ROLLOUT_PER_ROUND
+  PPO_START_FROM_SFT
+  PPO_REF_FIXED_TO_SFT
+  ROLLOUT_TEMPERATURE
+  ROLLOUT_MAX_RESPONSE_LEN
+  ACTOR_LR
+  CRITIC_LR
+  KL_LOSS_COEF
+  REWARD_EVAL_MAX_SAMPLES
+  REWARD_EVAL_SHUFFLE_SEED
+  REWARD_UPDATE_EPOCHS
+  REWARD_STATIC_PREF_PATH
+  REWARD_STATIC_PREF_WEIGHT
+  REWARD_ONLINE_PREF_WEIGHT
+  REWARD_STATIC_PREF_BATCH_SIZE
+  EVAL_TEMPERATURE
+  WINRATE_GATE_ENABLED
+  WINRATE_GATE_MAX_ROUND
+  WINRATE_GATE_MAX_SAMPLES
+  WINRATE_GATE_CONCURRENCY
+  WINRATE_GATE_MIN
+  INTERROUND_WINRATE_GATE_MIN
+)
+
+{
+cat <<EOF
 run_tag=$PIPELINE_RUN_TAG
 run_log=$RUN_LOG
 cwd=$(pwd)
@@ -21,6 +48,12 @@ hostname=$(hostname)
 start_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
 command=bash scripts/run-full-pipeline-job.sh $*
 EOF
+for key in "${TRACKED_ENV_KEYS[@]}"; do
+  if [ -n "${!key:-}" ]; then
+    printf '%s=%s\n' "$key" "${!key}"
+  fi
+done
+} > "$RUN_ENV"
 
 echo "[pipeline-log] writing to $RUN_LOG"
 echo "[pipeline-log] env snapshot $RUN_ENV"
