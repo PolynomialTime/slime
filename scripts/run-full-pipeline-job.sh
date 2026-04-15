@@ -8,12 +8,12 @@ cd $SLIME
 export PYTHONPATH="$SLIME${PYTHONPATH:+:$PYTHONPATH}"
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
-SFT_SYNTH_FULL_DATA_PATH=${SFT_SYNTH_FULL_DATA_PATH:-${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.jsonl}}
-SFT_SYNTH_REPORT_PATH=${SFT_SYNTH_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth.report.json}
+SFT_SYNTH_FULL_DATA_PATH=${SFT_SYNTH_FULL_DATA_PATH:-${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft.jsonl}}
+SFT_SYNTH_REPORT_PATH=${SFT_SYNTH_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft.report.json}
 SFT_WARMUP_SAMPLES=${SFT_WARMUP_SAMPLES:-10000}
 SFT_WARMUP_SEED=${SFT_WARMUP_SEED:-42}
-SFT_WARMUP_DATA_PATH=${SFT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth-warmup${SFT_WARMUP_SAMPLES}.jsonl}
-SFT_WARMUP_REPORT_PATH=${SFT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-clean-synth-warmup${SFT_WARMUP_SAMPLES}.report.json}
+SFT_WARMUP_DATA_PATH=${SFT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-warmup${SFT_WARMUP_SAMPLES}.jsonl}
+SFT_WARMUP_REPORT_PATH=${SFT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-warmup${SFT_WARMUP_SAMPLES}.report.json}
 
 KEEP_ALL_ROUND_CHECKPOINTS=${KEEP_ALL_ROUND_CHECKPOINTS:-0}
 KEEP_ALL_ROUND_REWARD_SNAPSHOTS=${KEEP_ALL_ROUND_REWARD_SNAPSHOTS:-0}
@@ -54,7 +54,7 @@ WINRATE_GATE_FALLBACK_API_KEY=${WINRATE_GATE_FALLBACK_API_KEY:-${WINRATE_FALLBAC
 WINRATE_GATE_FALLBACK_BASE_URL=${WINRATE_GATE_FALLBACK_BASE_URL:-${WINRATE_FALLBACK_BASE_URL:-$WINRATE_GATE_BASE_URL}}
 CODEX_RULES_PATH=${CODEX_RULES_PATH:-/mnt/shared-storage-gpfs2/wangqianyi2/slime-autoresearch-notify/CODEX_HARD_RULES.md}
 TEST_DATA=$ULTRAFEEDBACK_DIR/uf-test.jsonl
-REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test-synth-prefs.jsonl}
+REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}
 REWARD_EXTERNAL_EVAL_BATCH_SIZE=${REWARD_EXTERNAL_EVAL_BATCH_SIZE:-32}
 EXPECTED_EVAL_LINES=2000
 if [ -f "$TEST_DATA" ]; then
@@ -74,11 +74,11 @@ if [ -z "$SFT_DATA_PATH" ]; then
   elif [ -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
     SFT_DATA_PATH=$SFT_SYNTH_FULL_DATA_PATH
   else
-    SFT_DATA_PATH=$ULTRAFEEDBACK_DIR/uf-sft-clean.jsonl
+    SFT_DATA_PATH=$ULTRAFEEDBACK_DIR/uf-sft.jsonl
   fi
 fi
 
-echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS KEEP_ALL_ROUND_REWARD_SNAPSHOTS=$KEEP_ALL_ROUND_REWARD_SNAPSHOTS SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT ACTOR_LR=${ACTOR_LR:-5e-7} CRITIC_LR=${CRITIC_LR:-1e-6} KL_LOSS_COEF=${KL_LOSS_COEF:-1.0} REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS KEEP_ALL_ROUND_REWARD_SNAPSHOTS=$KEEP_ALL_ROUND_REWARD_SNAPSHOTS SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT ACTOR_LR=${ACTOR_LR:-2e-6} CRITIC_LR=${CRITIC_LR:-5e-6} KL_LOSS_COEF=${KL_LOSS_COEF:-0.30} REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
 
 write_codex_hard_rules() {
   mkdir -p "$(dirname "$CODEX_RULES_PATH")"
@@ -96,25 +96,14 @@ EOF
 write_codex_hard_rules
 
 ensure_synth_sft_full_data() {
-  local synth_input=$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl
   if [ -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
-    # Rebuild if source is newer than derived file
-    if [ -f "$synth_input" ] && [ "$synth_input" -nt "$SFT_SYNTH_FULL_DATA_PATH" ]; then
-      echo "WARNING: $synth_input is newer than $SFT_SYNTH_FULL_DATA_PATH, rebuilding"
-    else
-      return 0
-    fi
+    return 0
   fi
-  if [ ! -f "$synth_input" ]; then
-    echo "ERROR: missing synthetic train chosen data at $synth_input" >&2
-    echo "ERROR: generate uf-train-synth-chosen.jsonl before running from synthetic SFT data." >&2
+  if [ ! -f "$SFT_SYNTH_FULL_DATA_PATH" ]; then
+    echo "ERROR: missing SFT data at $SFT_SYNTH_FULL_DATA_PATH" >&2
+    echo "ERROR: set SFT_DATA_PATH or place uf-sft.jsonl under $ULTRAFEEDBACK_DIR before running the pipeline." >&2
     exit 1
   fi
-  echo "===== Building synthetic SFT clean dataset ====="
-  python3 scripts/build_sft_clean_from_synth.py \
-    --input "$synth_input" \
-    --output "$SFT_SYNTH_FULL_DATA_PATH" \
-    --report "$SFT_SYNTH_REPORT_PATH"
 }
 
 ensure_sft_warmup_data() {
@@ -130,7 +119,7 @@ ensure_sft_warmup_data() {
       return 0
     fi
   fi
-  echo "===== Building synthetic SFT warmup subset ====="
+  echo "===== Building SFT warmup subset ====="
   python3 scripts/sample_jsonl.py \
     --input "$SFT_SYNTH_FULL_DATA_PATH" \
     --output "$SFT_WARMUP_DATA_PATH" \
@@ -145,6 +134,7 @@ reset_pipeline_state() {
   shopt -s nullglob
   for path in \
     "$SLIME"/models/save_dir_r* \
+    "$SLIME"/models/critic_r* \
     "$SLIME"/eval/outputs_policy_r*.jsonl \
     "$SLIME"/rollout/rollout_*.pt \
     "$SLIME"/tensorboard_log/slime-irl \
@@ -605,7 +595,7 @@ run_external_reward_eval() {
 
   if ! reward_external_eval_data_ready; then
     echo "ERROR: missing external reward eval positives at $REWARD_EXTERNAL_EVAL_PATH" >&2
-    echo "ERROR: generate uf-test synthetic prefs data before running the pipeline." >&2
+    echo "ERROR: expected a chosen/rejected UltraFeedback eval file at the configured path." >&2
     exit 1
   fi
   if [ ! -d "$model_path" ]; then
@@ -673,6 +663,18 @@ prune_stale_checkpoints() {
     rm -rf "$save_dir"
   done
 
+  local keep_critic_dir=$SLIME/models/critic_r${current_round}
+  for critic_dir in "$SLIME"/models/critic_r*; do
+    if [ ! -d "$critic_dir" ]; then
+      continue
+    fi
+    if [ "$critic_dir" = "$keep_critic_dir" ]; then
+      continue
+    fi
+    echo "Pruning obsolete critic checkpoint $critic_dir after successful export for round $current_round"
+    rm -rf "$critic_dir"
+  done
+
   if [ "$KEEP_ALL_ROUND_REWARD_SNAPSHOTS" -eq 1 ]; then
     return 0
   fi
@@ -702,7 +704,7 @@ fi
 echo "===== Round 0: Bootstrap rollout (SFT-aligned rollouts for R1 reward update) ====="
 BOOTSTRAP_SAVE_DIR=$SLIME/models/save_dir_bootstrap
 if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null | wc -l)" -lt "$BOOTSTRAP_NUM_ROLLOUT" ]; then
-  rm -rf $BOOTSTRAP_SAVE_DIR /tmp/critic_ckpt 2>/dev/null || true
+  rm -rf $BOOTSTRAP_SAVE_DIR 2>/dev/null || true
 
   MODEL_SH=scripts/models/qwen3-8B.sh \
   HF_CKPT=$SFT_HF_DIR \
@@ -819,8 +821,6 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   echo "===== Round $ROUND/$NUM_ROUNDS: PPO ====="
   check_disk_space "round${ROUND}-pre-ppo" "$SLIME/models" "$MIN_FREE_DISK_GB_PPO"
 
-  rm -rf $ROUND_SAVE_DIR /tmp/critic_ckpt 2>/dev/null || true
-
   if [ "$PPO_REF_FIXED_TO_SFT" -eq 1 ]; then
     ROUND_REF_CKPT=$SFT_MEGATRON_DIR
   elif [ "$ROUND" -eq 1 ]; then
@@ -838,11 +838,23 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     ROUND_ACTOR_LOAD=$PREV_SAVE_DIR
   fi
 
+  ROUND_CRITIC_SAVE=$SLIME/models/critic_r${ROUND}
+  ROUND_CRITIC_LOAD=""
+  rm -rf "$ROUND_SAVE_DIR" "$ROUND_CRITIC_SAVE" 2>/dev/null || true
+  if [ "$ROUND" -gt 1 ]; then
+    PREV_CRITIC=$SLIME/models/critic_r$((ROUND - 1))
+    if [ -d "$PREV_CRITIC" ] && [ -f "$PREV_CRITIC/latest_checkpointed_iteration.txt" ]; then
+      ROUND_CRITIC_LOAD=$PREV_CRITIC
+    fi
+  fi
+
   MODEL_SH=scripts/models/qwen3-8B.sh \
   HF_CKPT=$SFT_HF_DIR \
   REF_CKPT=$ROUND_REF_CKPT \
   SAVE_DIR=$ROUND_SAVE_DIR \
   ACTOR_LOAD=$ROUND_ACTOR_LOAD \
+  CRITIC_SAVE_DIR=$ROUND_CRITIC_SAVE \
+  CRITIC_LOAD_DIR=$ROUND_CRITIC_LOAD \
   PROMPT_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   DEMO_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND \

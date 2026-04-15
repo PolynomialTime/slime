@@ -804,8 +804,10 @@ def initialize_model_and_optimizer(
         checkpointing_context={},
         skip_load_to_model_and_opt=False,
     )
-    if role == "critic":
+    if role == "critic" and not getattr(args, "critic_true_resume", False):
         _reinitialize_critic_output_layers(model)
+    elif role == "critic":
+        logger.info("[critic] Loaded critic checkpoint with optimizer state; keep output_layer as-is")
     clear_memory()
 
     opt_param_scheduler.step(increment=iteration * args.global_batch_size)

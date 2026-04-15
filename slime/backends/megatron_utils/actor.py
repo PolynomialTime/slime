@@ -4,6 +4,7 @@ import random
 import socket
 from argparse import Namespace
 from contextlib import nullcontext
+from pathlib import Path
 
 import ray
 import torch
@@ -40,6 +41,17 @@ from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 logging.getLogger("megatron").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+def _is_distinct_checkpoint_path(actor_load: str | None, critic_load: str | None) -> bool:
+    if not critic_load:
+        return False
+    if not actor_load:
+        return True
+    try:
+        return Path(actor_load).resolve() != Path(critic_load).resolve()
+    except OSError:
+        return actor_load != critic_load
 
 
 class MegatronTrainRayActor(TrainRayActor):
@@ -96,12 +108,20 @@ class MegatronTrainRayActor(TrainRayActor):
             return 0
 
         if role == "critic":
+            actor_load = getattr(self.args, "load", None)
+            self.args.critic_true_resume = _is_distinct_checkpoint_path(actor_load, self.args.critic_load)
             self.args.load = self.args.critic_load
             self.args.save = self.args.critic_save
             self.args.lr = self.args.critic_lr
             self.args.lr_warmup_iters = self.args.critic_lr_warmup_iters
             self.args.clip_grad = self.args.critic_clip_grad
-            logger.info("[critic] using lr=%s warmup_iters=%s clip_grad=%s", self.args.lr, self.args.lr_warmup_iters, self.args.clip_grad)
+            logger.info(
+                "[critic] using lr=%s warmup_iters=%s clip_grad=%s critic_true_resume=%s",
+                self.args.lr,
+                self.args.lr_warmup_iters,
+                self.args.clip_grad,
+                self.args.critic_true_resume,
+            )
 
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role

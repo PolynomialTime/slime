@@ -141,6 +141,12 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         help="Number of recent rollout files to aggregate for each reward update.",
     )
     parser.add_argument(
+        "--reward-online-pref-weight",
+        type=float,
+        default=1.0,
+        help="Weight for online rollout-vs-demo preference loss during reward update.",
+    )
+    parser.add_argument(
         "--reward-update-fn-path",
         type=str,
         default="slime.local_rm.update_reward.update_reward",
@@ -174,6 +180,30 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         help="JSON key for reward eval rejected answer.",
     )
     parser.add_argument(
+        "--reward-eval-target-path",
+        type=str,
+        default=None,
+        help="Optional path to external eval targets. When unset, use reward-eval rejected answers from reward-eval-path.",
+    )
+    parser.add_argument(
+        "--reward-eval-target-prompt-key",
+        type=str,
+        default="prompt",
+        help="JSON key for prompt in reward eval target dataset.",
+    )
+    parser.add_argument(
+        "--reward-eval-target-answer-key",
+        type=str,
+        default="response",
+        help="JSON key for answer in reward eval target dataset.",
+    )
+    parser.add_argument(
+        "--reward-eval-holdout-ratio",
+        type=float,
+        default=0.1,
+        help="Prompt-level holdout ratio for inline reward eval when no external eval data is provided.",
+    )
+    parser.add_argument(
         "--reward-eval-batch-size",
         type=int,
         default=None,
@@ -186,10 +216,22 @@ def add_irl_pipeline_arguments(parser: ArgumentParser) -> ArgumentParser:
         help="Max number of eval samples to score. If not set, evaluate all.",
     )
     parser.add_argument(
+        "--reward-eval-shuffle-seed",
+        type=int,
+        default=42,
+        help="Shuffle seed used before subsampling reward eval data.",
+    )
+    parser.add_argument(
         "--reward-eval-cuda-visible-devices",
         type=str,
         default=None,
         help="CUDA_VISIBLE_DEVICES for reward eval subprocess.",
+    )
+    parser.add_argument(
+        "--enable-win-rate-eval",
+        action="store_true",
+        default=False,
+        help="Opt in to online win-rate evaluation. Disabled by default for offline GPU training runs.",
     )
     parser.add_argument(
         "--win-rate-eval-path",
@@ -256,6 +298,7 @@ def _call_reward_update(args, rollout_id: int) -> bool:
             "reward_demo_path": args.reward_demo_path,
             "reward_demo_prompt_key": args.reward_demo_prompt_key,
             "reward_demo_answer_key": args.reward_demo_answer_key,
+            "reward_online_pref_weight": args.reward_online_pref_weight,
             "reward_update_epochs": args.reward_update_epochs,
             "reward_update_batch_size": args.reward_update_batch_size,
             "reward_update_lr": args.reward_update_lr,
@@ -273,7 +316,12 @@ def _call_reward_update(args, rollout_id: int) -> bool:
             "reward_eval_prompt_key": args.reward_eval_prompt_key,
             "reward_eval_chosen_key": args.reward_eval_chosen_key,
             "reward_eval_rejected_key": args.reward_eval_rejected_key,
+            "reward_eval_target_path": args.reward_eval_target_path,
+            "reward_eval_target_prompt_key": args.reward_eval_target_prompt_key,
+            "reward_eval_target_answer_key": args.reward_eval_target_answer_key,
+            "reward_eval_holdout_ratio": args.reward_eval_holdout_ratio,
             "reward_eval_max_samples": args.reward_eval_max_samples,
+            "reward_eval_shuffle_seed": args.reward_eval_shuffle_seed,
             "reward_eval_batch_size": args.reward_eval_batch_size,
         }
         args_json_path.write_text(json.dumps(reward_args, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -322,8 +370,12 @@ def _call_reward_eval(args, rollout_id: int) -> None:
             "reward_eval_prompt_key": args.reward_eval_prompt_key,
             "reward_eval_chosen_key": args.reward_eval_chosen_key,
             "reward_eval_rejected_key": args.reward_eval_rejected_key,
+            "reward_eval_target_path": args.reward_eval_target_path,
+            "reward_eval_target_prompt_key": args.reward_eval_target_prompt_key,
+            "reward_eval_target_answer_key": args.reward_eval_target_answer_key,
             "reward_eval_batch_size": args.reward_eval_batch_size,
             "reward_eval_max_samples": args.reward_eval_max_samples,
+            "reward_eval_shuffle_seed": args.reward_eval_shuffle_seed,
             "reward_update_batch_size": args.reward_update_batch_size,
             "apply_chat_template": args.apply_chat_template,
             "apply_chat_template_kwargs": args.apply_chat_template_kwargs,
@@ -343,6 +395,15 @@ def _call_reward_eval(args, rollout_id: int) -> None:
         subprocess.run(cmd, check=True, env=env)
     else:
         reward_eval(args, rollout_id)
+
+
+def _call_win_rate_eval(args, rollout_id: int) -> None:
+    if not getattr(args, "enable_win_rate_eval", False):
+        if not getattr(args, "_win_rate_eval_disabled_logged", False):
+            logger.info("win_rate_eval disabled by default; set --enable-win-rate-eval to opt in.")
+            setattr(args, "_win_rate_eval_disabled_logged", True)
+        return
+    win_rate_eval(args, rollout_id)
 
 
 def train(args) -> None:
@@ -418,7 +479,7 @@ def train(args) -> None:
 
         if is_updated is True:
             _call_reward_eval(args, rollout_id)
-            win_rate_eval(args, rollout_id)
+            _call_win_rate_eval(args, rollout_id)
 
         offload_train()
         if args.offload_rollout:

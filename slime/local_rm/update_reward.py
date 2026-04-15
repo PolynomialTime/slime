@@ -189,13 +189,13 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
             prompt_filter=prompt_filter,
         )
     if not demo_samples:
-        raise RuntimeError("No synthetic demo samples were loaded for reward update.")
+        raise RuntimeError("No reward demo samples were loaded for reward update.")
 
     demo_samples_by_prompt = _build_prompt_index(demo_samples)
     missing = [sample.prompt for sample in all_rollout_samples if sample.prompt not in demo_samples_by_prompt]
     if missing:
         raise RuntimeError(
-            "Prompt-matched reward update found %d rollout samples without synthetic demos. Example prompt prefix: %s"
+            "Prompt-matched reward update found %d rollout samples without reward demos. Example prompt prefix: %s"
             % (len(missing), missing[0][:200])
         )
 

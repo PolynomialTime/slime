@@ -26,7 +26,7 @@ ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 ROUND_ID=${ROUND_ID:-0}
 ROLLOUT_END=${ROLLOUT_END:-335}
 NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-336}
-REWARD_TRAIN_SYNTH_PATH=${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-synth-chosen.jsonl}
+REWARD_TRAIN_DATA_PATH=${REWARD_TRAIN_DATA_PATH:-${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-prefs.jsonl}}
 REWARD_EVAL_PATH=${REWARD_EVAL_PATH:-}
 REWARD_EVAL_TARGET_PATH=${REWARD_EVAL_TARGET_PATH:-}
 REWARD_EVAL_REJECTED_KEY=${REWARD_EVAL_REJECTED_KEY:-}
@@ -38,8 +38,8 @@ REWARD_UPDATE_BATCH_SIZE=${REWARD_UPDATE_BATCH_SIZE:-4}
 REWARD_UPDATE_EPOCHS=${REWARD_UPDATE_EPOCHS:-1}
 REWARD_ONLINE_PREF_WEIGHT=${REWARD_ONLINE_PREF_WEIGHT:-1.0}
 
-if [ ! -f "$REWARD_TRAIN_SYNTH_PATH" ]; then
-  echo "ERROR: missing synthetic reward train data at $REWARD_TRAIN_SYNTH_PATH" >&2
+if [ ! -f "$REWARD_TRAIN_DATA_PATH" ]; then
+  echo "ERROR: missing reward train data at $REWARD_TRAIN_DATA_PATH" >&2
   exit 1
 fi
 
@@ -67,7 +67,7 @@ cat > $ARGS_JSON <<EOF
   "hf_checkpoint": "${HF_CKPT:-$SLIME/models/sft_checkpoint_8b_hf}",
   "reward_model_dir": "$REWARD_DIR",
   "reward_model_init": null,
-  "reward_demo_path": "$REWARD_TRAIN_SYNTH_PATH",
+  "reward_demo_path": "$REWARD_TRAIN_DATA_PATH",
   "reward_demo_prompt_key": "text",
   "reward_demo_answer_key": "chosen",
   "reward_online_pref_weight": $REWARD_ONLINE_PREF_WEIGHT,

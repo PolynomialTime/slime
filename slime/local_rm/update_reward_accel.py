@@ -358,7 +358,7 @@ def main():
             prompt_filter=all_prompt_filter,
         )
     if not demo_samples:
-        raise RuntimeError("No synthetic demo samples were loaded for reward update.")
+        raise RuntimeError("No reward demo samples were loaded for reward update.")
 
     demo_samples_by_prompt = _build_prompt_index(demo_samples)
     missing = [sample.prompt for sample in all_rollout_samples if sample.prompt not in demo_samples_by_prompt]
@@ -366,7 +366,7 @@ def main():
     if missing_count > 0:
         example_prompt = missing[0][:200] if missing else "<missing on another rank>"
         raise RuntimeError(
-            "Prompt-matched reward update found %d rollout samples without synthetic demos. "
+            "Prompt-matched reward update found %d rollout samples without reward demos. "
             "Example prompt prefix: %s" % (missing_count, example_prompt)
         )
 
@@ -406,7 +406,7 @@ def main():
 
     if accelerator.is_main_process:
         accelerator.print(
-            "Loaded %d synthetic demos, %d total rollouts, %d train rollouts, %d eval rollouts"
+            "Loaded %d reward demos, %d total rollouts, %d train rollouts, %d eval rollouts"
             % (
                 len(demo_samples),
                 len(all_rollout_samples),
@@ -516,6 +516,7 @@ def main():
     best_acc = -1.0
     best_margin = float("-inf")
     best_state_dict = None
+    best_config_snapshot = None
     global_batch_idx = 0
 
     for _epoch in tqdm(
@@ -635,6 +636,12 @@ def main():
                             key: value.detach().cpu().clone()
                             for key, value in unwrapped.state_dict().items()
                         }
+                        best_cfg = _cfg(model)
+                        best_config_snapshot = {
+                            "bias": float(getattr(best_cfg, "bias", 0.0)),
+                            "normalization_constant": float(getattr(best_cfg, "normalization_constant", 1.0)),
+                            "c_coef": float(getattr(best_cfg, "c_coef", 1.0)),
+                        }
                     accelerator.print(
                         f"[reward_eval] batch={global_batch_idx}"
                         f" acc={acc:.4f}"
@@ -681,6 +688,10 @@ def main():
 
         if best_state_dict is not None:
             unwrapped.load_state_dict(best_state_dict)
+            if best_config_snapshot is not None:
+                cfg = _cfg(model)
+                for k, v in best_config_snapshot.items():
+                    setattr(cfg, k, v)
             accelerator.print(f"[reward] Restored best checkpoint with acc={best_acc:.4f} margin={best_margin:.4f}")
 
         restored_acc = -1.0

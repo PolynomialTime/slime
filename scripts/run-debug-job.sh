@@ -1,22 +1,9 @@
 #!/bin/bash
-# Debug job: 跳过 SFT，直接用 base 权重跑 IRL 3 轮 + reward update
-# 目的：验证 reward update 在 GPU 3 能跑通
-set -ex
+set -euo pipefail
 
-SLIME=/mnt/shared-storage-gpfs2/wangqianyi2/slime
-cd $SLIME
-
-rm -rf $SLIME/models/reward_model
-rm -rf $SLIME/models/save_dir_debug
-rm -rf $SLIME/rollout
-rm -rf $SLIME/tensorboard_log
-
-# 不设 CUDA_VISIBLE_DEVICES，让 Ray 自然分配 GPU 0-2
-MODEL_SH=scripts/models/qwen3-1.7B.sh \
-HF_CKPT=$SLIME/models/qwen3-1.7b-base \
-REF_CKPT=$SLIME/models/qwen3-1.7b-base_torch_dist \
-SAVE_DIR=$SLIME/models/save_dir_debug \
-PROMPT_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
-DEMO_DATA=$SLIME/hh-rlhf-processed/hh-rlhf-merged-train.jsonl \
-REWARD_UPDATE_LAUNCHER=accelerate \
-bash scripts/run-irl-debug.sh
+echo "ERROR: scripts/run-debug-job.sh is deprecated and intentionally disabled." >&2
+echo "ERROR: It still points at the old HH-RLHF / Qwen3-1.7B debug path and must not be used." >&2
+echo "Use the supported mainline scripts or a dedicated modern debug wrapper instead." >&2
+echo "  - bash scripts/run-full-pipeline-job.sh" >&2
+echo "  - bash scripts/run-full-pipeline-logged.sh" >&2
+exit 1
