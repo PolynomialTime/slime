@@ -50,13 +50,21 @@ def is_content_filter_error(exc: Exception) -> bool:
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         err = body.get("error", {})
-        if err.get("code") == "content_filter":
+        if err.get("code") in ("content_filter", "data_inspection_failed"):
+            return True
+        err_type = err.get("type")
+        if err_type == "data_inspection_failed":
             return True
     code = getattr(exc, "code", None)
-    if code == "content_filter":
+    if code in ("content_filter", "data_inspection_failed"):
         return True
     message = str(exc).lower()
-    return "content_filter" in message or "content management policy" in message
+    return (
+        "content_filter" in message
+        or "content management policy" in message
+        or "data_inspection_failed" in message
+        or "inappropriate content" in message
+    )
 
 
 def get_error_message(exc: Exception) -> str:
@@ -231,13 +239,14 @@ async def judge_pair(
                         attempt = 0
                         await asyncio.sleep(1)
                         continue
-                    if using_fallback:
-                        raise RuntimeError(
-                            f"judge request blocked by content filter on fallback model={active_model}"
-                        ) from e
-                    raise RuntimeError(
-                        "judge request blocked by content filter and no fallback judge is configured"
-                    ) from e
+                    message = get_error_message(e)
+                    scope = "fallback model" if using_fallback else "primary judge with no fallback configured"
+                    logger.warning(
+                        "judge request blocked by content filter on %s; marking sample as parse_error: %s",
+                        scope,
+                        message,
+                    )
+                    return "Tie", f"CONTENT_FILTER: {message}", True
                 if is_repeat_failed_request_error(e):
                     retry_nonce += 1
                     active_content = add_retry_nonce(content, retry_nonce)

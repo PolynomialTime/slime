@@ -10,6 +10,7 @@ pkill -9 python || true
 sleep 3
 
 REWARD_DIR=${REWARD_DIR:-/mnt/shared-storage-gpfs2/wangqianyi2/slime/models/reward_model}
+REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-}
 REWARD_LOG_DIR=${REWARD_LOG_DIR:-$REWARD_DIR/logs}
 REWARD_RUN_TS=${REWARD_RUN_TS:-$(date +%Y%m%d-%H%M%S)}
 REWARD_RUN_TAG=${REWARD_RUN_TAG:-round${ROUND_ID:-0}_rollout${ROLLOUT_END:-335}_${REWARD_RUN_TS}}
@@ -26,7 +27,7 @@ ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 ROUND_ID=${ROUND_ID:-0}
 ROLLOUT_END=${ROLLOUT_END:-335}
 NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-336}
-REWARD_TRAIN_DATA_PATH=${REWARD_TRAIN_DATA_PATH:-${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-prefs.jsonl}}
+REWARD_TRAIN_DATA_PATH=${REWARD_TRAIN_DATA_PATH:-${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-synth-prefs-clean.jsonl}}
 REWARD_EVAL_PATH=${REWARD_EVAL_PATH:-}
 REWARD_EVAL_TARGET_PATH=${REWARD_EVAL_TARGET_PATH:-}
 REWARD_EVAL_REJECTED_KEY=${REWARD_EVAL_REJECTED_KEY:-}
@@ -37,6 +38,10 @@ REWARD_EVAL_BATCH_SIZE=${REWARD_EVAL_BATCH_SIZE:-32}
 REWARD_UPDATE_BATCH_SIZE=${REWARD_UPDATE_BATCH_SIZE:-4}
 REWARD_UPDATE_EPOCHS=${REWARD_UPDATE_EPOCHS:-1}
 REWARD_ONLINE_PREF_WEIGHT=${REWARD_ONLINE_PREF_WEIGHT:-1.0}
+REWARD_MODEL_INIT_JSON=null
+if [ -n "$REWARD_MODEL_INIT" ]; then
+  REWARD_MODEL_INIT_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$REWARD_MODEL_INIT")
+fi
 
 if [ ! -f "$REWARD_TRAIN_DATA_PATH" ]; then
   echo "ERROR: missing reward train data at $REWARD_TRAIN_DATA_PATH" >&2
@@ -66,7 +71,7 @@ cat > $ARGS_JSON <<EOF
 {
   "hf_checkpoint": "${HF_CKPT:-$SLIME/models/sft_checkpoint_8b_hf}",
   "reward_model_dir": "$REWARD_DIR",
-  "reward_model_init": null,
+  "reward_model_init": $REWARD_MODEL_INIT_JSON,
   "reward_demo_path": "$REWARD_TRAIN_DATA_PATH",
   "reward_demo_prompt_key": "text",
   "reward_demo_answer_key": "chosen",
@@ -75,11 +80,11 @@ cat > $ARGS_JSON <<EOF
   "reward_update_batch_size": $REWARD_UPDATE_BATCH_SIZE,
   "reward_update_lr": 1e-6,
   "c_coef_init": 0.5,
-  "c_coef_min": 0.01,
-  "c_coef_max": 10.0,
-  "coef_scale_up": 1.2,
+  "c_coef_min": 0.05,
+  "c_coef_max": 5.0,
+  "coef_scale_up": 1.05,
   "coef_scale_down": 0.95,
-  "target_reward_l2_norm": 1.5,
+  "target_reward_l2_norm": 0.6,
   "apply_chat_template": true,
   "apply_chat_template_kwargs": {"enable_thinking": false},
   "save_debug_rollout_data": "$SLIME/rollout/rollout_{rollout_id}.pt",

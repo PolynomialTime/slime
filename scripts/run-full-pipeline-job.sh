@@ -8,15 +8,21 @@ cd $SLIME
 export PYTHONPATH="$SLIME${PYTHONPATH:+:$PYTHONPATH}"
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
+REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-}
+BASE_HF_DIR=${BASE_HF_DIR:-$SLIME/models/qwen3-8B-base}
+BASE_TORCH_DIST_DIR=${BASE_TORCH_DIST_DIR:-$SLIME/models/qwen3-8b-base_torch_dist}
 SFT_SYNTH_FULL_DATA_PATH=${SFT_SYNTH_FULL_DATA_PATH:-${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft.jsonl}}
 SFT_SYNTH_REPORT_PATH=${SFT_SYNTH_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft.report.json}
 SFT_WARMUP_SAMPLES=${SFT_WARMUP_SAMPLES:-10000}
 SFT_WARMUP_SEED=${SFT_WARMUP_SEED:-42}
-SFT_WARMUP_DATA_PATH=${SFT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-warmup${SFT_WARMUP_SAMPLES}.jsonl}
-SFT_WARMUP_REPORT_PATH=${SFT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft-warmup${SFT_WARMUP_SAMPLES}.report.json}
+_SFT_FULL_STEM=$(basename "$SFT_SYNTH_FULL_DATA_PATH" .jsonl)
+SFT_WARMUP_DATA_PATH=${SFT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/${_SFT_FULL_STEM}-warmup${SFT_WARMUP_SAMPLES}.jsonl}
+SFT_WARMUP_REPORT_PATH=${SFT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/${_SFT_FULL_STEM}-warmup${SFT_WARMUP_SAMPLES}.report.json}
 
 KEEP_ALL_ROUND_CHECKPOINTS=${KEEP_ALL_ROUND_CHECKPOINTS:-0}
 KEEP_ALL_ROUND_REWARD_SNAPSHOTS=${KEEP_ALL_ROUND_REWARD_SNAPSHOTS:-0}
+KEEP_FINAL_POLICY_PER_ROUND=${KEEP_FINAL_POLICY_PER_ROUND:-1}
+KEEP_FINAL_REWARD_PER_ROUND=${KEEP_FINAL_REWARD_PER_ROUND:-1}
 EVAL_TEMPERATURE=${EVAL_TEMPERATURE:-0.0}
 MIN_FREE_DISK_GB=${MIN_FREE_DISK_GB:-}
 MIN_FREE_DISK_GB_PPO=${MIN_FREE_DISK_GB_PPO:-${MIN_FREE_DISK_GB:-60}}
@@ -25,15 +31,21 @@ START_ROUND=${START_ROUND:-1}
 FROM_SCRATCH=${FROM_SCRATCH:-0}
 SFT_NUM_EPOCHS=${SFT_NUM_EPOCHS:-1}
 NUM_ROUNDS=${NUM_ROUNDS:-7}
-NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-100}
+NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-75}
 BOOTSTRAP_NUM_ROLLOUT=${BOOTSTRAP_NUM_ROLLOUT:-$NUM_ROLLOUT_PER_ROUND}
 BOOTSTRAP_ROLLOUT_TEMPERATURE=${BOOTSTRAP_ROLLOUT_TEMPERATURE:-0.7}
 ROLLOUT_MAX_RESPONSE_LEN=${ROLLOUT_MAX_RESPONSE_LEN:-768}
-ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.2}
+ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.4}
 ROLLOUT_HEALTH_MAX_TRUNCATED=${ROLLOUT_HEALTH_MAX_TRUNCATED:-0.2}
 PPO_START_FROM_SFT=${PPO_START_FROM_SFT:-0}
 # Round 1 still uses SFT as ref; later rounds default to previous round checkpoint.
 PPO_REF_FIXED_TO_SFT=${PPO_REF_FIXED_TO_SFT:-0}
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-32}
+ACTOR_LR=${ACTOR_LR:-3e-6}
+CRITIC_LR=${CRITIC_LR:-5e-6}
+KL_LOSS_COEF=${KL_LOSS_COEF:-0.05}
+SLIME_CUSTOM_RM_TRUNCATION_PENALTY=${SLIME_CUSTOM_RM_TRUNCATION_PENALTY:-2.5}
+SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=${SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC:-0.8}
 REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-0}
 REWARD_EVAL_SHUFFLE_SEED=${REWARD_EVAL_SHUFFLE_SEED:-42}
 REWARD_UPDATE_EPOCHS=${REWARD_UPDATE_EPOCHS:-1}
@@ -53,7 +65,26 @@ WINRATE_GATE_FALLBACK_MODEL=${WINRATE_GATE_FALLBACK_MODEL:-claude-sonnet-4-6}
 WINRATE_GATE_FALLBACK_API_KEY=${WINRATE_GATE_FALLBACK_API_KEY:-${WINRATE_FALLBACK_API_KEY:-}}
 WINRATE_GATE_FALLBACK_BASE_URL=${WINRATE_GATE_FALLBACK_BASE_URL:-${WINRATE_FALLBACK_BASE_URL:-$WINRATE_GATE_BASE_URL}}
 CODEX_RULES_PATH=${CODEX_RULES_PATH:-/mnt/shared-storage-gpfs2/wangqianyi2/slime-autoresearch-notify/CODEX_HARD_RULES.md}
+BT_PRETRAIN_DIR=${BT_PRETRAIN_DIR:-$SLIME/models/reward_model_bt_pretrain/latest}
+BT_PRETRAIN_BASE_MODEL=${BT_PRETRAIN_BASE_MODEL:-$SLIME/models/qwen3-8B-base}
+BT_PRETRAIN_ENABLED=${BT_PRETRAIN_ENABLED:-1}
+SFT_ENABLED=${SFT_ENABLED:-1}
+REWARD_BT_FULL_DATA_PATH=${REWARD_BT_FULL_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-train-prefs.jsonl}
+REWARD_BT_WARMUP_SAMPLES=${REWARD_BT_WARMUP_SAMPLES:-8000}
+REWARD_BT_WARMUP_SEED=${REWARD_BT_WARMUP_SEED:-42}
+_BT_FULL_STEM=$(basename "$REWARD_BT_FULL_DATA_PATH" .jsonl)
+REWARD_BT_WARMUP_DATA_PATH=${REWARD_BT_WARMUP_DATA_PATH:-$ULTRAFEEDBACK_DIR/${_BT_FULL_STEM}-warmup${REWARD_BT_WARMUP_SAMPLES}.jsonl}
+REWARD_BT_WARMUP_REPORT_PATH=${REWARD_BT_WARMUP_REPORT_PATH:-$ULTRAFEEDBACK_DIR/${_BT_FULL_STEM}-warmup${REWARD_BT_WARMUP_SAMPLES}.report.json}
+REWARD_BT_EVAL_PATH=${REWARD_BT_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}
+REWARD_BT_EPOCHS=${REWARD_BT_EPOCHS:-1}
+REWARD_BT_BATCH_SIZE=${REWARD_BT_BATCH_SIZE:-4}
+REWARD_BT_EVAL_BATCH_SIZE=${REWARD_BT_EVAL_BATCH_SIZE:-8}
+REWARD_BT_LR=${REWARD_BT_LR:-1e-6}
+REWARD_BT_HOLDOUT_RATIO=${REWARD_BT_HOLDOUT_RATIO:-0.1}
+REWARD_BT_EVAL_INTERVAL=${REWARD_BT_EVAL_INTERVAL:-100}
+REWARD_BT_C_COEF_INIT=${REWARD_BT_C_COEF_INIT:-0.5}
 TEST_DATA=$ULTRAFEEDBACK_DIR/uf-test.jsonl
+REWARD_TRAIN_DATA_PATH=${REWARD_TRAIN_DATA_PATH:-${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-prefs.jsonl}}
 REWARD_EXTERNAL_EVAL_PATH=${REWARD_EXTERNAL_EVAL_PATH:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}
 REWARD_EXTERNAL_EVAL_BATCH_SIZE=${REWARD_EXTERNAL_EVAL_BATCH_SIZE:-32}
 EXPECTED_EVAL_LINES=2000
@@ -61,6 +92,13 @@ if [ -f "$TEST_DATA" ]; then
   ACTUAL_EVAL_LINES=$(awk 'END {print NR}' "$TEST_DATA")
   if [ "$ACTUAL_EVAL_LINES" -gt 0 ]; then
     EXPECTED_EVAL_LINES=$ACTUAL_EVAL_LINES
+  fi
+fi
+EXPECTED_REWARD_EVAL_LINES=$EXPECTED_EVAL_LINES
+if [ -f "$REWARD_EXTERNAL_EVAL_PATH" ]; then
+  ACTUAL_REWARD_EVAL_LINES=$(awk 'END {print NR}' "$REWARD_EXTERNAL_EVAL_PATH")
+  if [ "$ACTUAL_REWARD_EVAL_LINES" -gt 0 ]; then
+    EXPECTED_REWARD_EVAL_LINES=$ACTUAL_REWARD_EVAL_LINES
   fi
 fi
 
@@ -78,7 +116,7 @@ if [ -z "$SFT_DATA_PATH" ]; then
   fi
 fi
 
-echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS KEEP_ALL_ROUND_REWARD_SNAPSHOTS=$KEEP_ALL_ROUND_REWARD_SNAPSHOTS SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT ACTOR_LR=${ACTOR_LR:-2e-6} CRITIC_LR=${CRITIC_LR:-5e-6} KL_LOSS_COEF=${KL_LOSS_COEF:-0.30} REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+echo "Pipeline config: START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS KEEP_ALL_ROUND_REWARD_SNAPSHOTS=$KEEP_ALL_ROUND_REWARD_SNAPSHOTS KEEP_FINAL_POLICY_PER_ROUND=$KEEP_FINAL_POLICY_PER_ROUND KEEP_FINAL_REWARD_PER_ROUND=$KEEP_FINAL_REWARD_PER_ROUND REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-<default>} SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE ACTOR_LR=$ACTOR_LR CRITIC_LR=$CRITIC_LR KL_LOSS_COEF=$KL_LOSS_COEF SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
 
 write_codex_hard_rules() {
   mkdir -p "$(dirname "$CODEX_RULES_PATH")"
@@ -128,21 +166,75 @@ ensure_sft_warmup_data() {
     --report "$SFT_WARMUP_REPORT_PATH"
 }
 
+ensure_bt_warmup_data() {
+  if [ ! -f "$REWARD_BT_FULL_DATA_PATH" ]; then
+    echo "ERROR: missing BT pretrain full data at $REWARD_BT_FULL_DATA_PATH" >&2
+    exit 1
+  fi
+  if [ -f "$REWARD_BT_WARMUP_DATA_PATH" ] && [ "$(awk 'END {print NR}' "$REWARD_BT_WARMUP_DATA_PATH")" -eq "$REWARD_BT_WARMUP_SAMPLES" ]; then
+    if [ "$REWARD_BT_FULL_DATA_PATH" -nt "$REWARD_BT_WARMUP_DATA_PATH" ]; then
+      echo "WARNING: $REWARD_BT_FULL_DATA_PATH is newer than $REWARD_BT_WARMUP_DATA_PATH, rebuilding BT warmup"
+    else
+      return 0
+    fi
+  fi
+  echo "===== Building BT warmup subset ($REWARD_BT_WARMUP_SAMPLES samples) ====="
+  python3 scripts/sample_jsonl.py \
+    --input "$REWARD_BT_FULL_DATA_PATH" \
+    --output "$REWARD_BT_WARMUP_DATA_PATH" \
+    --count "$REWARD_BT_WARMUP_SAMPLES" \
+    --seed "$REWARD_BT_WARMUP_SEED" \
+    --report "$REWARD_BT_WARMUP_REPORT_PATH"
+}
+
+detect_sft_data_keys() {
+  python3 - "$SFT_DATA_PATH" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        if "messages" in row:
+            print("messages")
+            print("")
+            raise SystemExit(0)
+        if "text" in row and "label" in row:
+            print("text")
+            print("label")
+            raise SystemExit(0)
+        raise SystemExit(f"Unsupported SFT row schema in {path}: keys={sorted(row.keys())}")
+raise SystemExit(f"No JSONL rows found in {path}")
+PY
+}
+
 reset_pipeline_state() {
   echo "===== FROM_SCRATCH=1: removing derived pipeline artifacts ====="
-  rm -rf "$SFT_HF_DIR" "$SFT_MEGATRON_DIR" "$REWARD_DIR" "$SLIME/models/save_dir_bootstrap"
+  rm -rf "$SFT_HF_DIR" "$SFT_MEGATRON_DIR" "$REWARD_DIR" "$SLIME/models/save_dir_bootstrap" "$SLIME/models/save_dir_bootstrap_critic"
+  rm -rf "$SLIME/models/reward_model_bt_pretrain"
   shopt -s nullglob
   for path in \
     "$SLIME"/models/save_dir_r* \
     "$SLIME"/models/critic_r* \
+    "$SLIME"/models/policy_r*_hf \
     "$SLIME"/eval/outputs_policy_r*.jsonl \
+    "$SLIME"/eval/winrate_r*.json \
+    "$SLIME"/eval/winrate_r*.log \
+    "$SLIME"/eval_winrate/winrate_r*.json \
+    "$SLIME"/eval_winrate/winrate_r*.log \
     "$SLIME"/rollout/rollout_*.pt \
     "$SLIME"/tensorboard_log/slime-irl \
-    "$SLIME"/tensorboard_log/slime-sft; do
+    "$SLIME"/tensorboard_log/slime-sft \
+    "$SLIME"/tensorboard_log/slime-reward; do
     rm -rf "$path"
   done
   shopt -u nullglob
   rm -f "$SFT_BASELINE"
+  echo "Preserved: models/qwen3-*-base, models/qwen3-8b-base_torch_dist, ultrafeedback/"
 }
 
 if [ "$SFT_DATA_PATH" = "$SFT_SYNTH_FULL_DATA_PATH" ]; then
@@ -153,6 +245,9 @@ if [ "$FROM_SCRATCH" -eq 1 ]; then
   START_ROUND=1
   reset_pipeline_state
 fi
+
+# Always nuke tensorboard_log at pipeline start so each run gets a clean TB tree.
+rm -rf "$SLIME/tensorboard_log" 2>/dev/null || true
 
 check_disk_space() {
   local stage=$1
@@ -174,7 +269,10 @@ check_disk_space() {
 }
 
 SKIP_SFT=0
-if [ -d "$SFT_HF_DIR" ] && [ -f "$SFT_HF_DIR/config.json" ] && [ -f "$SFT_MEGATRON_DIR/latest_checkpointed_iteration.txt" ]; then
+if [ "$SFT_ENABLED" -ne 1 ]; then
+  SKIP_SFT=1
+  echo "SFT_ENABLED=0: skipping SFT training (requires existing checkpoints at $SFT_HF_DIR and $SFT_MEGATRON_DIR)"
+elif [ -d "$SFT_HF_DIR" ] && [ -f "$SFT_HF_DIR/config.json" ] && [ -f "$SFT_MEGATRON_DIR/latest_checkpointed_iteration.txt" ]; then
   SKIP_SFT=1
 fi
 
@@ -218,8 +316,10 @@ if [ "$START_ROUND" -eq 1 ]; then
       rm -rf $SFT_MEGATRON_DIR
       rm -rf $SFT_HF_DIR
     fi
-    rm -rf $SLIME/models/reward_model
+    rm -rf $REWARD_DIR
     rm -rf $SLIME/models/save_dir_r*
+    rm -rf $SLIME/models/critic_r*
+    rm -rf $SLIME/models/save_dir_bootstrap $SLIME/models/save_dir_bootstrap_critic
     rm -rf $SLIME/models/policy_r*_hf
     rm -rf $SLIME/rollout
     rm -rf $SLIME/tensorboard_log
@@ -237,8 +337,12 @@ fi
 
 # ============ Phase -1: Convert base model HF → torch_dist ============
 echo "===== Converting Qwen3-8B HF → torch_dist ====="
-if [ ! -f "$SLIME/models/qwen3-8b-base_torch_dist/release/mp_rank_00_000/model_optim_rng.pt" ] && \
-   [ ! -d "$SLIME/models/qwen3-8b-base_torch_dist/release" ]; then
+if [ ! -d "$BASE_HF_DIR" ]; then
+  echo "ERROR: missing base HF checkpoint at $BASE_HF_DIR" >&2
+  exit 1
+fi
+if [ ! -f "$BASE_TORCH_DIST_DIR/release/mp_rank_00_000/model_optim_rng.pt" ] && \
+   [ ! -d "$BASE_TORCH_DIST_DIR/release" ]; then
   bash scripts/run-convert-8b-job.sh
   # Kill any leftover processes from conversion before SFT
   pkill -9 python || true
@@ -246,7 +350,7 @@ if [ ! -f "$SLIME/models/qwen3-8b-base_torch_dist/release/mp_rank_00_000/model_o
   pkill -9 ray || true
   sleep 3
 else
-  echo "Skipping conversion: qwen3-8b-base_torch_dist already exists"
+  echo "Skipping conversion: $BASE_TORCH_DIST_DIR already exists"
 fi
 
 # ============ Phase 0: SFT ============
@@ -259,11 +363,16 @@ else
     echo "ERROR: missing cleaned SFT data at $SFT_DATA_PATH"
     exit 1
   fi
+  mapfile -t SFT_KEYS < <(detect_sft_data_keys)
+  SFT_INPUT_KEY=${SFT_KEYS[0]}
+  SFT_LABEL_KEY=${SFT_KEYS[1]}
   MODEL_SH=scripts/models/qwen3-8B.sh \
-  HF_CKPT=$SLIME/models/qwen3-8b-base \
-  ACTOR_CKPT=$SLIME/models/qwen3-8b-base_torch_dist \
+  HF_CKPT=$BASE_HF_DIR \
+  ACTOR_CKPT=$BASE_TORCH_DIST_DIR \
   SAVE_DIR=$SFT_MEGATRON_DIR \
   SFT_DATA=$SFT_DATA_PATH \
+  SFT_INPUT_KEY=$SFT_INPUT_KEY \
+  SFT_LABEL_KEY=$SFT_LABEL_KEY \
   SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS \
   bash scripts/run-sft-prod.sh
 fi
@@ -282,7 +391,7 @@ else
   python3 tools/convert_torch_dist_to_hf.py \
     --input-dir $CKPT_DIR \
     --output-dir $SFT_HF_DIR \
-    --origin-hf-dir $SLIME/models/qwen3-8b-base \
+    --origin-hf-dir $BASE_HF_DIR \
     --force
 fi
 
@@ -315,7 +424,7 @@ generate_with_sglang() {
     --temperature $EVAL_TEMPERATURE \
     --apply-chat-template \
     --apply-chat-template-kwargs '{"enable_thinking":false}' \
-    --max-new-tokens 512 \
+    --max-new-tokens 1024 \
     --concurrency 256
   kill $SGLANG_PID 2>/dev/null || true
   wait $SGLANG_PID 2>/dev/null || true
@@ -501,8 +610,13 @@ round_smoke_gates() {
 round_train_complete() {
   local round=$1
   local round_save_dir=$SLIME/models/save_dir_r${round}
-  local round_reward_eval=$SLIME/models/reward_model/reward_eval_round_${round}.json
-  [ -f "$round_save_dir/latest_checkpointed_iteration.txt" ] && [ -f "$round_reward_eval" ]
+  local round_reward_eval=$REWARD_DIR/reward_eval_round_${round}.json
+  local round_reward_snapshot
+  round_reward_snapshot=$(round_reward_model_snapshot "$round")
+  [ -f "$round_save_dir/latest_checkpointed_iteration.txt" ] && \
+    [ -f "$round_reward_eval" ] && \
+    [ -f "$round_reward_snapshot/config.json" ] && \
+    { [ -f "$round_reward_snapshot/pytorch_model.bin" ] || [ -f "$round_reward_snapshot/pytorch_model.bin.index.json" ]; }
 }
 
 round_export_complete() {
@@ -518,7 +632,7 @@ round_output_complete() {
 
 reward_external_eval_data_ready() {
   [ -f "$REWARD_EXTERNAL_EVAL_PATH" ] || return 1
-  python3 - "$REWARD_EXTERNAL_EVAL_PATH" "$EXPECTED_EVAL_LINES" <<'PY'
+  python3 - "$REWARD_EXTERNAL_EVAL_PATH" "$EXPECTED_REWARD_EVAL_LINES" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -605,17 +719,18 @@ run_external_reward_eval() {
 
   mkdir -p "$REWARD_DIR"
   rm -f "$eval_json" "$args_json"
-  python3 - "$args_json" "$SFT_HF_DIR" "$REWARD_DIR" "$model_path" "$REWARD_EXTERNAL_EVAL_PATH" "$eval_json" "$REWARD_EXTERNAL_EVAL_BATCH_SIZE" <<'PY'
+  python3 - "$args_json" "$SFT_HF_DIR" "$REWARD_DIR" "$model_path" "$REWARD_EXTERNAL_EVAL_PATH" "$eval_json" "$REWARD_EXTERNAL_EVAL_BATCH_SIZE" "$REWARD_MODEL_INIT" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 args_path = Path(sys.argv[1])
+reward_model_init = sys.argv[8] or None
 cfg = {
     "hf_checkpoint": sys.argv[2],
     "reward_model_dir": sys.argv[3],
     "reward_model_path": sys.argv[4],
-    "reward_model_init": None,
+    "reward_model_init": reward_model_init,
     "apply_chat_template": True,
     "apply_chat_template_kwargs": {"enable_thinking": False},
     "reward_eval_path": sys.argv[5],
@@ -642,53 +757,81 @@ PY
 
 prune_stale_checkpoints() {
   local current_round=$1
-  if [ "$KEEP_ALL_ROUND_CHECKPOINTS" -eq 1 ]; then
-    return 0
-  fi
-
   if ! round_export_complete "$current_round"; then
     echo "WARNING: current round $current_round export or external reward eval is incomplete; keeping existing checkpoints"
     return 0
   fi
 
-  local keep_dir=$SLIME/models/save_dir_r${current_round}
-  for save_dir in "$SLIME"/models/save_dir_r*; do
-    if [ ! -d "$save_dir" ]; then
-      continue
-    fi
-    if [ "$save_dir" = "$keep_dir" ]; then
-      continue
-    fi
-    echo "Pruning obsolete checkpoint $save_dir after successful export for round $current_round"
-    rm -rf "$save_dir"
-  done
+  if [ "$KEEP_ALL_ROUND_CHECKPOINTS" -ne 1 ] && [ "$KEEP_FINAL_POLICY_PER_ROUND" -ne 1 ]; then
+    local keep_dir=$SLIME/models/save_dir_r${current_round}
+    for save_dir in "$SLIME"/models/save_dir_r*; do
+      if [ ! -d "$save_dir" ]; then
+        continue
+      fi
+      if [ "$save_dir" = "$keep_dir" ]; then
+        continue
+      fi
+      echo "Pruning obsolete checkpoint $save_dir after successful export for round $current_round"
+      rm -rf "$save_dir"
+    done
+  fi
 
-  local keep_critic_dir=$SLIME/models/critic_r${current_round}
+  if [ "$KEEP_ALL_ROUND_CHECKPOINTS" -ne 1 ]; then
+    local keep_critic_dir=$SLIME/models/critic_r${current_round}
+    for critic_dir in "$SLIME"/models/critic_r*; do
+      if [ ! -d "$critic_dir" ]; then
+        continue
+      fi
+      if [ "$critic_dir" = "$keep_critic_dir" ]; then
+        continue
+      fi
+      echo "Pruning obsolete critic checkpoint $critic_dir after successful export for round $current_round"
+      rm -rf "$critic_dir"
+    done
+  fi
+
+  if [ "$KEEP_ALL_ROUND_REWARD_SNAPSHOTS" -ne 1 ] && [ "$KEEP_FINAL_REWARD_PER_ROUND" -ne 1 ]; then
+    local keep_reward_dir
+    keep_reward_dir=$(round_reward_model_snapshot "$current_round")
+    for reward_step_dir in "$REWARD_DIR"/step_round*; do
+      if [ ! -d "$reward_step_dir" ]; then
+        continue
+      fi
+      if [ "$reward_step_dir" = "$keep_reward_dir" ]; then
+        continue
+      fi
+      echo "Pruning reward snapshot $reward_step_dir after successful external eval for round $current_round"
+      rm -rf "$reward_step_dir"
+    done
+  fi
+
+  # SFT Megatron checkpoint is a long-lived asset needed for Round 1 ref/resume.
+  # Do not prune it here; only delete at the very end of the pipeline if desired.
+}
+
+cleanup_transient_training_artifacts() {
+  local bootstrap_dir=$SLIME/models/save_dir_bootstrap
+
+  if [ -d "$bootstrap_dir" ]; then
+    echo "Removing transient bootstrap checkpoint $bootstrap_dir"
+    rm -rf "$bootstrap_dir"
+  fi
+
   for critic_dir in "$SLIME"/models/critic_r*; do
     if [ ! -d "$critic_dir" ]; then
       continue
     fi
-    if [ "$critic_dir" = "$keep_critic_dir" ]; then
-      continue
-    fi
-    echo "Pruning obsolete critic checkpoint $critic_dir after successful export for round $current_round"
+    echo "Removing transient critic checkpoint $critic_dir"
     rm -rf "$critic_dir"
   done
 
-  if [ "$KEEP_ALL_ROUND_REWARD_SNAPSHOTS" -eq 1 ]; then
-    return 0
-  fi
-
-  for reward_step_dir in "$REWARD_DIR"/step_round*; do
-    if [ ! -d "$reward_step_dir" ]; then
+  for policy_hf_dir in "$SLIME"/models/policy_r*_hf; do
+    if [ ! -d "$policy_hf_dir" ]; then
       continue
     fi
-    echo "Pruning reward snapshot $reward_step_dir after successful external eval for round $current_round"
-    rm -rf "$reward_step_dir"
+    echo "Removing transient HF export $policy_hf_dir"
+    rm -rf "$policy_hf_dir"
   done
-
-  # SFT Megatron checkpoint is a long-lived asset needed for Round 1 ref/resume.
-  # Do not prune it here; only delete at the very end of the pipeline if desired.
 }
 
 # ============ Generate SFT baseline outputs (for offline winrate comparison) ============
@@ -698,6 +841,86 @@ if [ "$SKIP_SFT_BASELINE" -eq 1 ]; then
   echo "Skipping SFT baseline generation: found $SFT_BASELINE"
 else
   generate_with_sglang $SFT_HF_DIR $SFT_BASELINE
+fi
+
+# ============ Phase 0.5: BT reward pretrain (auto-run if checkpoint missing) ============
+SKIP_BT_PRETRAIN=0
+if [ "$BT_PRETRAIN_ENABLED" -ne 1 ]; then
+  SKIP_BT_PRETRAIN=1
+  echo "BT_PRETRAIN_ENABLED=0: skipping BT pretrain and BT seed (reward model will start from scratch)"
+else
+  rm -rf "$BT_PRETRAIN_DIR"
+  echo "BT_PRETRAIN_ENABLED=1: forcing fresh BT pretrain (cleared $BT_PRETRAIN_DIR)"
+fi
+
+if [ "$SKIP_BT_PRETRAIN" -eq 1 ]; then
+  if [ "$BT_PRETRAIN_ENABLED" -eq 1 ]; then
+    echo "Skipping BT reward pretrain: found $BT_PRETRAIN_DIR"
+  fi
+else
+  echo "===== Phase 0.5: BT reward pretrain ($REWARD_BT_WARMUP_SAMPLES samples) ====="
+  ensure_bt_warmup_data
+
+  pkill -9 sglang || true
+  ray stop --force 2>/dev/null || true
+  pkill -9 ray || true
+  pkill -9 python || true
+  sleep 3
+
+  REWARD_BT_BASE_MODEL=$BT_PRETRAIN_BASE_MODEL \
+  REWARD_BT_ROOT=$SLIME/models/reward_model_bt_pretrain \
+  REWARD_BT_OUTPUT_DIR=$BT_PRETRAIN_DIR \
+  REWARD_BT_PREF_PATH=$REWARD_BT_WARMUP_DATA_PATH \
+  REWARD_BT_EVAL_PATH=$REWARD_BT_EVAL_PATH \
+  REWARD_BT_EPOCHS=$REWARD_BT_EPOCHS \
+  REWARD_BT_BATCH_SIZE=$REWARD_BT_BATCH_SIZE \
+  REWARD_BT_EVAL_BATCH_SIZE=$REWARD_BT_EVAL_BATCH_SIZE \
+  REWARD_BT_LR=$REWARD_BT_LR \
+  REWARD_BT_HOLDOUT_RATIO=$REWARD_BT_HOLDOUT_RATIO \
+  REWARD_BT_EVAL_INTERVAL=$REWARD_BT_EVAL_INTERVAL \
+  REWARD_BT_C_COEF_INIT=$REWARD_BT_C_COEF_INIT \
+  bash scripts/pretrain-reward-bt.sh
+
+  echo "===== Killing BT pretrain processes ====="
+  pkill -9 python || true
+  sleep 3
+
+  if [ ! -f "$BT_PRETRAIN_DIR/config.json" ]; then
+    echo "ERROR: BT pretrain finished but checkpoint missing at $BT_PRETRAIN_DIR" >&2
+    exit 1
+  fi
+fi
+
+# ============ Seed reward_model/latest from BT pretrain ============
+NEED_BT_SEED=0
+if [ "$BT_PRETRAIN_ENABLED" -eq 1 ] && [ -f "$BT_PRETRAIN_DIR/config.json" ]; then
+  if [ "$START_ROUND" -le 1 ] && [ ! -d "$REWARD_DIR/step_round1" ]; then
+    NEED_BT_SEED=1
+  fi
+fi
+
+if [ "$NEED_BT_SEED" -eq 1 ]; then
+  echo "===== Seeding reward_model/latest from BT pretrain: $BT_PRETRAIN_DIR ====="
+  mkdir -p "$REWARD_DIR"
+  rm -rf "$REWARD_DIR/latest"
+  cp -r "$BT_PRETRAIN_DIR" "$REWARD_DIR/latest"
+elif [ "$START_ROUND" -gt 1 ]; then
+  PREV_ROUND_REWARD=$REWARD_DIR/step_round$((START_ROUND - 1))
+  if [ ! -d "$REWARD_DIR/latest" ] && [ -d "$PREV_ROUND_REWARD" ]; then
+    echo "===== Resume: restoring reward_model/latest from $PREV_ROUND_REWARD ====="
+    cp -r "$PREV_ROUND_REWARD" "$REWARD_DIR/latest"
+  elif [ -d "$REWARD_DIR/latest" ]; then
+    echo "Resume: preserving existing reward_model/latest for round $START_ROUND"
+  else
+    echo "WARNING: resume from round $START_ROUND but no reward_model/latest and no $PREV_ROUND_REWARD; reward will cold-start"
+  fi
+else
+  echo "No BT seed needed (BT disabled or round-1 reward already trained)"
+fi
+
+if [ "$BT_PRETRAIN_ENABLED" -eq 1 ] && [ -f "$BT_PRETRAIN_DIR/config.json" ] && [ -z "${REWARD_MODEL_INIT:-}" ]; then
+  REWARD_MODEL_INIT=$BT_PRETRAIN_BASE_MODEL
+  echo "Auto-set REWARD_MODEL_INIT=$REWARD_MODEL_INIT (BT backbone persists across resume)"
 fi
 
 # Round 0: Bootstrap rollout — collect SFT-aligned rollouts so R1 can train RM
@@ -712,11 +935,21 @@ if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null 
   SAVE_DIR=$BOOTSTRAP_SAVE_DIR \
   PROMPT_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   DEMO_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
+  PROMPT_INPUT_KEY=text \
+  PROMPT_LABEL_KEY= \
   NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT \
   ALIGN_ROLLOUT_WITH_SFT=1 \
   DEBUG_ROLLOUT_ONLY=1 \
+  REWARD_MODEL_DIR=$REWARD_DIR \
+  REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
   ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE \
   ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
+  GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE \
+  ACTOR_LR=$ACTOR_LR \
+  CRITIC_LR=$CRITIC_LR \
+  KL_LOSS_COEF=$KL_LOSS_COEF \
+  SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY \
+  SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC \
   TB_EXP_NAME=bootstrap \
   bash scripts/run-irl-prod.sh
 
@@ -748,7 +981,7 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   ROUND_POLICY_HF=$SLIME/models/policy_r${ROUND}_hf
   ROUND_OUTPUT=$SLIME/eval/outputs_policy_r${ROUND}.jsonl
   ROUND_SAVE_DIR=$SLIME/models/save_dir_r${ROUND}
-  ROUND_REWARD_EVAL=$SLIME/models/reward_model/reward_eval_round_${ROUND}.json
+  ROUND_REWARD_EVAL=$REWARD_DIR/reward_eval_round_${ROUND}.json
   ROUND_TRAIN_READY=0
   ROUND_EXPORT_READY=0
   if round_train_complete "$ROUND"; then
@@ -799,6 +1032,8 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     ROUND_ID=$ROUND \
     ROLLOUT_END=$RU_ROLLOUT_END \
     NUM_ROLLOUT_PER_ROUND=$RU_NUM_ROLLOUT \
+    REWARD_DIR=$REWARD_DIR \
+    REWARD_TRAIN_DATA_PATH=$REWARD_TRAIN_DATA_PATH \
     REWARD_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH \
     REWARD_EVAL_REJECTED_KEY=rejected \
     REWARD_EVAL_TARGET_PATH= \
@@ -808,6 +1043,7 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS \
     REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE \
     REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT \
+    REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
     bash scripts/run-reward-update.sh
   fi
 
@@ -834,19 +1070,23 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   fi
 
   ROUND_ACTOR_LOAD=""
-  if [ "$PPO_START_FROM_SFT" -ne 1 ]; then
+  if [ "$PPO_START_FROM_SFT" -eq 1 ]; then
+    ROUND_ACTOR_LOAD=$SFT_MEGATRON_DIR
+  else
     ROUND_ACTOR_LOAD=$PREV_SAVE_DIR
   fi
 
   ROUND_CRITIC_SAVE=$SLIME/models/critic_r${ROUND}
   ROUND_CRITIC_LOAD=""
   rm -rf "$ROUND_SAVE_DIR" "$ROUND_CRITIC_SAVE" 2>/dev/null || true
-  if [ "$ROUND" -gt 1 ]; then
-    PREV_CRITIC=$SLIME/models/critic_r$((ROUND - 1))
-    if [ -d "$PREV_CRITIC" ] && [ -f "$PREV_CRITIC/latest_checkpointed_iteration.txt" ]; then
-      ROUND_CRITIC_LOAD=$PREV_CRITIC
-    fi
-  fi
+  # Critic cold start every round: prevent value function from tracking reward
+  # too quickly and collapsing advantages to zero (which kills PPO gradient signal).
+  # if [ "$ROUND" -gt 1 ]; then
+  #   PREV_CRITIC=$SLIME/models/critic_r$((ROUND - 1))
+  #   if [ -d "$PREV_CRITIC" ] && [ -f "$PREV_CRITIC/latest_checkpointed_iteration.txt" ]; then
+  #     ROUND_CRITIC_LOAD=$PREV_CRITIC
+  #   fi
+  # fi
 
   MODEL_SH=scripts/models/qwen3-8B.sh \
   HF_CKPT=$SFT_HF_DIR \
@@ -857,10 +1097,20 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   CRITIC_LOAD_DIR=$ROUND_CRITIC_LOAD \
   PROMPT_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
   DEMO_DATA=$ULTRAFEEDBACK_DIR/uf-train.jsonl \
+  PROMPT_INPUT_KEY=text \
+  PROMPT_LABEL_KEY= \
   NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND \
   ALIGN_ROLLOUT_WITH_SFT=1 \
+  REWARD_MODEL_DIR=$REWARD_DIR \
+  REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
   ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE \
   ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
+  GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE \
+  ACTOR_LR=$ACTOR_LR \
+  CRITIC_LR=$CRITIC_LR \
+  KL_LOSS_COEF=$KL_LOSS_COEF \
+  SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY \
+  SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC \
   TB_EXP_NAME=round${ROUND} \
   bash scripts/run-irl-prod.sh
 
@@ -969,12 +1219,15 @@ except Exception as e:
   echo "===== Round $ROUND/$NUM_ROUNDS completed ====="
 done
 
+cleanup_transient_training_artifacts
+
 echo "===== All $NUM_ROUNDS rounds completed ====="
 echo "Eval outputs:"
 ls -la $SLIME/eval/outputs_*.jsonl
 echo "External reward eval outputs:"
 ls -la $REWARD_DIR/reward_eval_external_round_*.json
 echo "Per-round test-set outputs are generated automatically under eval/."
-echo "Only the newest training checkpoint is retained by default."
-echo "Keep all round checkpoints only when needed: KEEP_ALL_ROUND_CHECKPOINTS=1"
+echo "Per-round final policy checkpoints are retained under $SLIME/models/save_dir_r*."
+echo "Per-round final reward snapshots are retained under $REWARD_DIR/step_round*."
+echo "Transient critic checkpoints and temporary HF exports are removed automatically."
 echo "Run scripts/run-winrate-offline.sh on a networked machine to compute winrate."

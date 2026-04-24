@@ -40,6 +40,8 @@ HF_CKPT=${HF_CKPT:-"/path/to/hf_ckpt"}
 ACTOR_CKPT=${ACTOR_CKPT:-"/path/to/actor_ckpt"}
 SAVE_DIR=${SAVE_DIR:-"/path/to/save_dir"}
 SFT_DATA=${SFT_DATA:-"/path/to/sft_data.jsonl"}
+SFT_INPUT_KEY=${SFT_INPUT_KEY:-messages}
+SFT_LABEL_KEY=${SFT_LABEL_KEY:-}
 
 if [[ "$HF_CKPT" == "/path/to/"* ]]; then
   echo "Please set HF_CKPT/ACTOR_CKPT/SAVE_DIR/SFT_DATA."
@@ -57,7 +59,7 @@ CKPT_ARGS=(
 SFT_ARGS=(
    --rollout-function-path slime.rollout.sft_rollout.generate_rollout
    --prompt-data ${SFT_DATA}
-   --input-key messages
+   --input-key ${SFT_INPUT_KEY}
    --rollout-shuffle
    --num-epoch ${SFT_NUM_EPOCHS:-2}
    --rollout-batch-size 64
@@ -68,6 +70,10 @@ SFT_ARGS=(
    --disable-compute-advantages-and-returns
    --debug-train-only
 )
+
+if [ -n "${SFT_LABEL_KEY}" ]; then
+  SFT_ARGS+=(--label-key ${SFT_LABEL_KEY})
+fi
 
 PERF_ARGS=(
    --tensor-model-parallel-size 2

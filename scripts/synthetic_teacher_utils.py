@@ -11,6 +11,11 @@ DEFAULT_PROMPT_VERSION = "v1"
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_REQUEST_TIMEOUT = float(os.environ.get("SYNTH_TEACHER_REQUEST_TIMEOUT", "180"))
 
+# Hardcoded fallback credentials for the internal OpenAI-compatible proxy.
+# Used only when neither CLI flag nor environment variable supplies them.
+_FALLBACK_API_KEY = "sk-nGTCaRKDqGnda5kkfM49x2QegKpYqAesj5kUHWTaQ9YSLkYH"
+_FALLBACK_BASE_URL = "http://35.220.164.252:3888/v1"
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +30,7 @@ def resolve_api_key(explicit: str | None) -> str:
         or os.environ.get("WINRATE_API_KEY")
         or os.environ.get("OPENROUTER_API_KEY")
         or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-        or ""
+        or _FALLBACK_API_KEY
     )
 
 
@@ -35,7 +40,7 @@ def resolve_base_url(explicit: str | None) -> str | None:
         or os.environ.get("OPENAI_BASE_URL")
         or os.environ.get("WINRATE_BASE_URL")
         or os.environ.get("ANTHROPIC_BASE_URL")
-        or None
+        or _FALLBACK_BASE_URL
     )
 
 

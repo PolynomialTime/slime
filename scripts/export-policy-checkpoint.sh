@@ -31,7 +31,7 @@ fi
 CHECKPOINT_TAG="${CHECKPOINT_TAG:-${EXPORT_TAG}_rollout${ROLLOUT_COUNT}}"
 POLICY_HF_DIR="${POLICY_HF_DIR:-$SLIME/models/${CHECKPOINT_TAG}_hf}"
 OUTPUT_PATH="${OUTPUT_PATH:-$SLIME/eval/outputs_${CHECKPOINT_TAG}.jsonl}"
-ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8b-base}"
+ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8B-base}"
 TEST_DATA="${TEST_DATA:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}"
 SGLANG_PORT="${SGLANG_PORT:-30010}"
 EVAL_TEMPERATURE="${EVAL_TEMPERATURE:-0.0}"
@@ -103,7 +103,7 @@ generate_with_sglang() {
     --temperature "$EVAL_TEMPERATURE" \
     --apply-chat-template \
     --apply-chat-template-kwargs '{"enable_thinking":false}' \
-    --max-new-tokens 512 \
+    --max-new-tokens 1024 \
     --concurrency 256
 
   trap - EXIT

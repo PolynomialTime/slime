@@ -207,3 +207,6 @@ eval*
 eval/*
 ultra*
 logs/*
+
+numinamath/*
+mathtest/*

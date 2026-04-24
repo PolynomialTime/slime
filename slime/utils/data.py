@@ -17,12 +17,12 @@ from slime.utils.types import MultimodalTypes, Sample
 
 from .timer import Timer
 
-__all__ = ["Dataset"]
+__all__ = ["Dataset", "read_file", "read_file_with_source_row_ids"]
 
 logger = logging.getLogger(__name__)
 
 
-def read_file(path):
+def read_file_with_source_row_ids(path):
     path, row_slice = _parse_generalized_path(path)
     reader = None
 
@@ -60,12 +60,19 @@ def read_file(path):
     else:
         raise ValueError(f"Unsupported file format: {path}. Supported formats are .jsonl and .parquet.")
 
+    reader = enumerate(reader)
+
     if row_slice is not None:
 
         logger.info("read_file path=%s applying slice row_slice=%s", path, row_slice)
         reader = itertools.islice(reader, row_slice.start, row_slice.stop, row_slice.step)
 
     yield from reader
+
+
+def read_file(path):
+    for _, row in read_file_with_source_row_ids(path):
+        yield row
 
 
 def _parse_generalized_path(s: str):
@@ -187,12 +194,16 @@ class Dataset:
         apply_chat_template_kwargs=None,
     ):
         origin_samples = []
-        for data in read_file(path):
+        for source_row_id, data in read_file_with_source_row_ids(path):
             # Both chat templates and multimodal inputs require conversation format (list of message dicts)
             as_conversation = apply_chat_template or (multimodal_keys is not None)
             prompt = _build_messages(data, prompt_key, as_conversation, multimodal_keys)
 
             metadata = data.get(metadata_key) or {}
+            if not isinstance(metadata, dict):
+                raise TypeError(f"metadata must be a dict, got {type(metadata)} instead")
+            metadata = dict(metadata)
+            metadata.setdefault("source_row_id", source_row_id)
             tools = None
             if tool_key is not None and tool_key in data:
                 tools = data[tool_key]

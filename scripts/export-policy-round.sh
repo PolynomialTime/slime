@@ -30,7 +30,7 @@ SFT_HF_DIR="${SFT_HF_DIR:-$SLIME/models/sft_checkpoint_8b_hf}"
 ROUND_SAVE_DIR="${ROUND_SAVE_DIR:-$SLIME/models/save_dir_r${ROUND}}"
 ROUND_POLICY_HF="${ROUND_POLICY_HF:-$SLIME/models/policy_r${ROUND}_hf}"
 ROUND_OUTPUT="${ROUND_OUTPUT:-$SLIME/eval/outputs_policy_r${ROUND}.jsonl}"
-ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8b-base}"
+ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8B-base}"
 SGLANG_PORT="${SGLANG_PORT:-30010}"
 EVAL_TEMPERATURE="${EVAL_TEMPERATURE:-0.0}"
 MIN_FREE_DISK_GB="${MIN_FREE_DISK_GB:-}"
@@ -128,7 +128,7 @@ generate_with_sglang() {
     --temperature "$EVAL_TEMPERATURE" \
     --apply-chat-template \
     --apply-chat-template-kwargs '{"enable_thinking":false}' \
-    --max-new-tokens 512 \
+    --max-new-tokens 1024 \
     --concurrency 256
 
   trap - EXIT

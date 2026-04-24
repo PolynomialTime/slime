@@ -714,6 +714,16 @@ def _log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_
     if args.load_debug_rollout_data:
         return
 
+    if _should_skip_rollout_metric_logging(args):
+        logger.info(
+            "skip rollout tensorboard logging for supervised preprocessing "
+            "(loss_type=%s debug_train_only=%s rollout_id=%s)",
+            getattr(args, "loss_type", None),
+            getattr(args, "debug_train_only", None),
+            rollout_id,
+        )
+        return
+
     log_dict = {**(rollout_extra_metrics or {})}
     log_dict |= dict_add_prefix(compute_metrics_from_samples(args, samples), "rollout/")
     log_dict |= dict_add_prefix(compute_perf_metrics_from_samples(args, samples, rollout_time), "perf/")
@@ -753,6 +763,13 @@ def _sample_has_user_prefix(sample: Sample) -> bool:
 def _sample_has_assistant_prefix(sample: Sample) -> bool:
     prefix = _sample_response_prefix(sample).lower()
     return prefix.startswith("assistant") or prefix.startswith("<|im_start|>assistant")
+
+
+def _should_skip_rollout_metric_logging(args) -> bool:
+    # SFT uses the rollout manager only as a data-to-tokens preprocessing path.
+    # There is no model generation in this mode, so text-generation diagnostics
+    # like empty_rate/user_prefix_rate are misleading and should not be emitted.
+    return bool(getattr(args, "debug_train_only", False) and getattr(args, "loss_type", None) == "sft_loss")
 
 
 def compute_metrics_from_samples(args, samples):

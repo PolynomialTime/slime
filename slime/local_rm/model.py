@@ -74,7 +74,7 @@ class ScalarModel(PreTrainedModel):
             config.base_model,
             config=self.config.base_config,
             trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             low_cpu_mem_usage=False,
         )
         self.scalar_head = nn.Linear(self.config.hidden_size, 1, dtype=torch.bfloat16)
@@ -99,7 +99,7 @@ class ScalarModel(PreTrainedModel):
         model = cls.__new__(cls)
         PreTrainedModel.__init__(model, cfg)
         model.config = cfg
-        model.lm_backbone = AutoModel.from_config(base_config, trust_remote_code=True, torch_dtype=torch.bfloat16)
+        model.lm_backbone = AutoModel.from_config(base_config, trust_remote_code=True, dtype=torch.bfloat16)
         # Materialize any meta tensors to CPU
         model.lm_backbone = model.lm_backbone.to_empty(device="cpu")
         model.scalar_head = nn.Linear(cfg.hidden_size, 1, dtype=torch.bfloat16, device="cpu")
@@ -344,5 +344,15 @@ def tokenize_prompt_answer(
 
     prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
     answer_ids = tokenizer(answer, add_special_tokens=False)["input_ids"]
+    # Align demo tokens with rollout tokens: rollouts end with the assistant-turn
+    # terminator (<|im_end|> in Qwen3 chat format) because sglang emits it as a
+    # stop token. Without this append, the reward model can shortcut-classify by
+    # checking whether the last token is the terminator.
+    if apply_chat_template and answer_ids:
+        terminator_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if terminator_id is None or tokenizer.convert_ids_to_tokens(terminator_id) != "<|im_end|>":
+            terminator_id = tokenizer.eos_token_id
+        if terminator_id is not None and answer_ids[-1] != terminator_id:
+            answer_ids = answer_ids + [terminator_id]
     tokens = prompt_ids + answer_ids
     return DemoSample(tokens=tokens, response_length=len(answer_ids))

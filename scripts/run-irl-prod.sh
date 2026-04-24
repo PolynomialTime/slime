@@ -39,27 +39,32 @@ SAVE_DIR=${SAVE_DIR:-"/path/to/save_dir"}
 ACTOR_LOAD=${ACTOR_LOAD:-""}
 PROMPT_DATA=${PROMPT_DATA:-"/path/to/prompt.jsonl"}
 DEMO_DATA=${DEMO_DATA:-"/path/to/demo.jsonl"}
+PROMPT_INPUT_KEY=${PROMPT_INPUT_KEY:-text}
+PROMPT_LABEL_KEY=${PROMPT_LABEL_KEY:-}
 SLIME_ROOT=${SLIME_ROOT:-$(dirname "$SCRIPT_DIR")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-336}
 PPO_SAVE_INTERVAL=${PPO_SAVE_INTERVAL:-$NUM_ROLLOUT}
-ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-128}
+ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-256}
 ROLLOUT_MAX_RESPONSE_LEN=${ROLLOUT_MAX_RESPONSE_LEN:-768}
-ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.0}
-GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-16}
+ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.4}
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-32}
 ALIGN_ROLLOUT_WITH_SFT=${ALIGN_ROLLOUT_WITH_SFT:-0}
 DEBUG_ROLLOUT_ONLY=${DEBUG_ROLLOUT_ONLY:-0}
-ACTOR_LR=${ACTOR_LR:-2e-6}
+ACTOR_LR=${ACTOR_LR:-3e-6}
 CRITIC_LR=${CRITIC_LR:-5e-6}
 CRITIC_LR_WARMUP_ITERS=${CRITIC_LR_WARMUP_ITERS:-10}
 CLIP_GRAD=${CLIP_GRAD:-0.5}
 CRITIC_CLIP_GRAD=${CRITIC_CLIP_GRAD:-10.0}
 MAX_TOKENS_PER_GPU=${MAX_TOKENS_PER_GPU:-6144}
-KL_LOSS_COEF=${KL_LOSS_COEF:-0.30}
+KL_LOSS_COEF=${KL_LOSS_COEF:-0.10}
 REWARD_MODEL_DIR=${REWARD_MODEL_DIR:-${SLIME_ROOT}/models/reward_model}
+REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-""}
 CRITIC_SAVE_DIR=${CRITIC_SAVE_DIR:-${SAVE_DIR%/}_critic}
 CRITIC_LOAD_DIR=${CRITIC_LOAD_DIR:-""}
 ROLLOUT_DEBUG_DIR=${ROLLOUT_DEBUG_DIR:-${SLIME_ROOT}/rollout}
 ROLLOUT_DEBUG_PATH_TEMPLATE=${ROLLOUT_DEBUG_PATH_TEMPLATE:-}
+SLIME_CUSTOM_RM_TRUNCATION_PENALTY=${SLIME_CUSTOM_RM_TRUNCATION_PENALTY:-2.5}
+SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=${SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC:-0.8}
 if [ -z "${ROLLOUT_DEBUG_PATH_TEMPLATE}" ]; then
   ROLLOUT_DEBUG_PATH_TEMPLATE="${ROLLOUT_DEBUG_DIR}/rollout_{rollout_id}.pt"
 fi
@@ -96,8 +101,7 @@ fi
 
 ROLLOUT_ARGS=(
    --prompt-data ${PROMPT_DATA}
-   --input-key text
-   --label-key label
+   --input-key ${PROMPT_INPUT_KEY}
    --apply-chat-template
    --apply-chat-template-kwargs '{"enable_thinking":false}'
    --rollout-stop-token-ids "${ROLLOUT_STOP_TOKEN_IDS[@]}"
@@ -112,6 +116,10 @@ ROLLOUT_ARGS=(
    --global-batch-size ${GLOBAL_BATCH_SIZE}
    --balance-data
 )
+
+if [ -n "${PROMPT_LABEL_KEY}" ]; then
+  ROLLOUT_ARGS+=(--label-key ${PROMPT_LABEL_KEY})
+fi
 
 if [ "${ALIGN_ROLLOUT_WITH_SFT}" = "1" ]; then
   ROLLOUT_ARGS+=(
@@ -137,6 +145,9 @@ IRL_ARGS=(
    --reward-update-interval 999999
    --save-debug-rollout-data ${ROLLOUT_DEBUG_PATH_TEMPLATE}
 )
+if [ -n "$REWARD_MODEL_INIT" ]; then
+   IRL_ARGS+=(--reward-model-init ${REWARD_MODEL_INIT})
+fi
 
 PERF_ARGS=(
    --tensor-model-parallel-size 2
@@ -201,14 +212,17 @@ fi
 
 mkdir -p "${SAVE_DIR}" "${CRITIC_SAVE_DIR}" "$(dirname "${ROLLOUT_DEBUG_PATH_TEMPLATE}")"
 
-echo "Effective rollout config: num_rollout=${NUM_ROLLOUT} batch=${ROLLOUT_BATCH_SIZE} max_new_tokens=${ROLLOUT_MAX_RESPONSE_LEN} temperature=${ROLLOUT_TEMPERATURE} align_with_sft=${ALIGN_ROLLOUT_WITH_SFT} stop_token_ids=${ROLLOUT_STOP_TOKEN_IDS[*]} debug_rollout_only=${DEBUG_ROLLOUT_ONLY} use_ppo_args=$([ \"${DEBUG_ROLLOUT_ONLY}\" = \"1\" ] && echo 0 || echo 1)"
-echo "Effective checkpoint config: hf_ckpt=${HF_CKPT} actor_load=${ACTOR_LOAD:-<none>} critic_load_dir=${CRITIC_LOAD_DIR:-<none>} ref_ckpt=${REF_CKPT} reward_model_dir=${REWARD_MODEL_DIR} save_dir=${SAVE_DIR} critic_save_dir=${CRITIC_SAVE_DIR} rollout_debug_path=${ROLLOUT_DEBUG_PATH_TEMPLATE} save_interval=${PPO_SAVE_INTERVAL} tb_experiment=${TB_EXP_NAME:-prod}"
+echo "Effective rollout config: num_rollout=${NUM_ROLLOUT} batch=${ROLLOUT_BATCH_SIZE} global_batch=${GLOBAL_BATCH_SIZE} max_new_tokens=${ROLLOUT_MAX_RESPONSE_LEN} temperature=${ROLLOUT_TEMPERATURE} align_with_sft=${ALIGN_ROLLOUT_WITH_SFT} stop_token_ids=${ROLLOUT_STOP_TOKEN_IDS[*]} debug_rollout_only=${DEBUG_ROLLOUT_ONLY} use_ppo_args=$([ \"${DEBUG_ROLLOUT_ONLY}\" = \"1\" ] && echo 0 || echo 1)"
+echo "Effective checkpoint config: hf_ckpt=${HF_CKPT} actor_load=${ACTOR_LOAD:-<none>} critic_load_dir=${CRITIC_LOAD_DIR:-<none>} ref_ckpt=${REF_CKPT} reward_model_dir=${REWARD_MODEL_DIR} reward_model_init=${REWARD_MODEL_INIT:-<default>} save_dir=${SAVE_DIR} critic_save_dir=${CRITIC_SAVE_DIR} rollout_debug_path=${ROLLOUT_DEBUG_PATH_TEMPLATE} save_interval=${PPO_SAVE_INTERVAL} tb_experiment=${TB_EXP_NAME:-prod}"
+echo "Effective PPO/RM config: actor_lr=${ACTOR_LR} critic_lr=${CRITIC_LR} kl_loss_coef=${KL_LOSS_COEF} truncation_penalty=${SLIME_CUSTOM_RM_TRUNCATION_PENALTY} truncation_threshold_frac=${SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC}"
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export _REAL_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 # Let custom_rm pick the least-occupied GPU from the visible set instead of pinning GPU 0.
 export SLIME_CUSTOM_RM_CUDA_VISIBLE_DEVICES="${SLIME_CUSTOM_RM_CUDA_VISIBLE_DEVICES:-auto}"
 export SLIME_CUSTOM_RM_MAX_RESPONSE_LEN="${SLIME_CUSTOM_RM_MAX_RESPONSE_LEN:-${ROLLOUT_MAX_RESPONSE_LEN}}"
+export SLIME_CUSTOM_RM_TRUNCATION_PENALTY="${SLIME_CUSTOM_RM_TRUNCATION_PENALTY}"
+export SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC="${SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 RUNTIME_ENV_JSON="{
@@ -218,7 +232,9 @@ RUNTIME_ENV_JSON="{
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
     \"_REAL_CUDA_VISIBLE_DEVICES\": \"${_REAL_CUDA_VISIBLE_DEVICES}\",
     \"SLIME_CUSTOM_RM_CUDA_VISIBLE_DEVICES\": \"${SLIME_CUSTOM_RM_CUDA_VISIBLE_DEVICES}\",
-    \"SLIME_CUSTOM_RM_MAX_RESPONSE_LEN\": \"${SLIME_CUSTOM_RM_MAX_RESPONSE_LEN}\"
+    \"SLIME_CUSTOM_RM_MAX_RESPONSE_LEN\": \"${SLIME_CUSTOM_RM_MAX_RESPONSE_LEN}\",
+    \"SLIME_CUSTOM_RM_TRUNCATION_PENALTY\": \"${SLIME_CUSTOM_RM_TRUNCATION_PENALTY}\",
+    \"SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC\": \"${SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC}\"
   }
 }"
 

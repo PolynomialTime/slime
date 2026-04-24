@@ -1,5 +1,6 @@
 import logging
 
+from slime.local_rm.data import parse_hh_rlhf_text
 from slime.utils.mask_utils import MultiTurnLossMaskGenerator
 from slime.utils.processing_utils import load_processor, load_tokenizer
 
@@ -12,6 +13,36 @@ TOKENIZER = None
 PROCESSOR = None
 MASK_GENERATOR = None
 SAMPLE_PRINTED = False
+
+
+def _coerce_messages(sample):
+    prompt = sample.prompt
+    label = sample.label
+
+    if isinstance(prompt, list):
+        messages = prompt
+    elif isinstance(prompt, str):
+        stripped = prompt.lstrip()
+        if stripped.startswith("Human: "):
+            messages = parse_hh_rlhf_text(prompt)
+        elif stripped:
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            messages = []
+
+        if label is not None:
+            messages = [*messages, {"role": "assistant", "content": label}]
+    else:
+        messages = None
+
+    if not messages:
+        raise ValueError(
+            "SFT sample could not be converted to messages. "
+            f"prompt_type={type(prompt).__name__} label_is_none={label is None} "
+            f"sample_index={sample.index} group_index={sample.group_index}"
+        )
+
+    return messages
 
 
 def generate_rollout(args, rollout_id, data_buffer, evaluation=False):
@@ -43,7 +74,7 @@ def generate_rollout(args, rollout_id, data_buffer, evaluation=False):
 
     for i, sample in enumerate(samples):
         (sample,) = sample
-        messages = sample.prompt
+        messages = _coerce_messages(sample)
         tools = sample.metadata.get("tools", None)
 
         token_ids, loss_mask = MASK_GENERATOR.get_loss_mask(messages, tools=tools)

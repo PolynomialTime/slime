@@ -9,7 +9,14 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 
-from .data import iter_batches, load_demo_samples, load_rollout_samples
+from .data import (
+    build_token_sample_index,
+    init_alignment_stats,
+    iter_batches,
+    load_demo_samples,
+    load_rollout_samples,
+    match_token_sample,
+)
 from .model import (
     RunningMeanStd,
     get_reward_normalization_stats,
@@ -56,12 +63,59 @@ def _collect_rollout_paths(args, rollout_id: int, rollout_path: str) -> list[str
     return paths
 
 
-def _build_prompt_index(samples):
-    prompt_to_samples = defaultdict(list)
-    for sample in samples:
-        if sample.prompt is not None:
-            prompt_to_samples[sample.prompt].append(sample)
-    return prompt_to_samples
+def _filter_rollout_samples_with_demos(
+    rollout_samples,
+    demo_sample_index,
+    *,
+    max_missing_frac: float,
+):
+    matched_samples = []
+    missing_prompts = []
+    alignment_stats = init_alignment_stats()
+    for sample in rollout_samples:
+        matched_demo = match_token_sample(
+            sample,
+            demo_sample_index,
+            strict_row_id=True,
+            random_prompt_fallback=False,
+            stats=alignment_stats,
+        )
+        if matched_demo is not None:
+            matched_samples.append(sample)
+        else:
+            missing_prompts.append(sample.prompt)
+
+    total = len(rollout_samples)
+    missing_count = len(missing_prompts)
+    missing_frac = missing_count / max(total, 1)
+    stats = {
+        "total": total,
+        "matched": len(matched_samples),
+        "missing": missing_count,
+        "missing_frac": missing_frac,
+        "missing_unique_prompts": len({p for p in missing_prompts if p}),
+        "example_prompt": (missing_prompts[0][:200] if missing_prompts else None),
+    }
+    stats.update(alignment_stats)
+
+    if missing_count > 0 and missing_frac > max_missing_frac:
+        raise RuntimeError(
+            "Reward update found %d rollout samples without reward demos "
+            "(unique_prompts=%d, frac=%.4f, threshold=%.4f, matched_by_row_id=%d, prompt_fallback=%d, missing_row_id_match=%d, legacy=%d). Example prompt prefix: %s"
+            % (
+                missing_count,
+                stats["missing_unique_prompts"],
+                missing_frac,
+                max_missing_frac,
+                stats["matched_by_row_id"],
+                stats["matched_by_prompt_fallback"],
+                stats["missing_row_id_match"],
+                stats["legacy_samples_without_source_row_id"],
+                stats["example_prompt"] or "<none>",
+            )
+        )
+
+    return matched_samples, stats
 
 
 def _holdout_prompt(prompt: str, holdout_ratio: float) -> bool:
@@ -104,18 +158,25 @@ def _split_rollout_samples_by_prompt(samples, holdout_ratio: float):
     return train_samples, eval_samples
 
 
-def _build_eval_pairs(eval_rollout_samples, demo_samples_by_prompt, max_samples=None):
+def _build_eval_pairs(eval_rollout_samples, demo_sample_index, max_samples=None):
     demo_tokens = []
     roll_tokens = []
+    alignment_stats = init_alignment_stats()
     for sample in eval_rollout_samples:
-        matches = demo_samples_by_prompt.get(sample.prompt)
-        if not matches:
+        matched_demo = match_token_sample(
+            sample,
+            demo_sample_index,
+            strict_row_id=True,
+            random_prompt_fallback=False,
+            stats=alignment_stats,
+        )
+        if matched_demo is None:
             continue
-        demo_tokens.append(matches[0].tokens)
+        demo_tokens.append(matched_demo.tokens)
         roll_tokens.append(sample.tokens)
         if max_samples is not None and len(demo_tokens) >= max_samples:
             break
-    return demo_tokens, roll_tokens
+    return demo_tokens, roll_tokens, alignment_stats
 
 
 def _run_inline_eval(model, demo_tokens, roll_tokens, pad_id, device, batch_size: int):
@@ -152,9 +213,15 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
     tokenizer = load_tokenizer(base_model)
     if model_path.exists():
         model = init_reward_model(base_model, str(model_path))
+        logger.info(
+            "Loaded reward checkpoint from %s with carried c_coef=%.4f",
+            model_path,
+            float(getattr(model.config, "c_coef", getattr(args, "c_coef_init", 1.0))),
+        )
     else:
         model = init_reward_model(base_model, None)
-    model.config.c_coef = float(getattr(args, "c_coef_init", 1.0))
+        model.config.c_coef = float(getattr(args, "c_coef_init", 1.0))
+        logger.info("Initializing fresh reward model with c_coef_init=%.4f", model.config.c_coef)
     model.train()
 
     old_model = init_reward_model(base_model, str(model_path) if model_path.exists() else None)
@@ -173,9 +240,10 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
     if not all_rollout_samples:
         raise RuntimeError("No rollout samples were loaded for reward update.")
 
-    prompt_filter = {sample.prompt for sample in all_rollout_samples if sample.prompt}
-    if not prompt_filter:
-        raise RuntimeError("Loaded rollout samples do not contain prompt strings for matching.")
+    source_row_id_filter = {sample.source_row_id for sample in all_rollout_samples if sample.source_row_id is not None}
+    legacy_prompt_filter = {sample.prompt for sample in all_rollout_samples if sample.prompt and sample.source_row_id is None}
+    if not source_row_id_filter and not legacy_prompt_filter:
+        raise RuntimeError("Loaded rollout samples do not contain source_row_id or prompt strings for matching.")
 
     demo_samples = []
     if args.reward_demo_path:
@@ -186,18 +254,21 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
             answer_key=args.reward_demo_answer_key,
             apply_chat_template=args.apply_chat_template,
             apply_chat_template_kwargs=args.apply_chat_template_kwargs,
-            prompt_filter=prompt_filter,
+            source_row_id_filter=source_row_id_filter or None,
+            prompt_filter=legacy_prompt_filter or None,
         )
     if not demo_samples:
         raise RuntimeError("No reward demo samples were loaded for reward update.")
 
-    demo_samples_by_prompt = _build_prompt_index(demo_samples)
-    missing = [sample.prompt for sample in all_rollout_samples if sample.prompt not in demo_samples_by_prompt]
-    if missing:
-        raise RuntimeError(
-            "Prompt-matched reward update found %d rollout samples without reward demos. Example prompt prefix: %s"
-            % (len(missing), missing[0][:200])
-        )
+    demo_sample_index = build_token_sample_index(demo_samples)
+    max_missing_demo_frac = float(getattr(args, "reward_max_missing_demo_frac", 0.10) or 0.0)
+    all_rollout_samples, demo_match_stats = _filter_rollout_samples_with_demos(
+        all_rollout_samples,
+        demo_sample_index,
+        max_missing_frac=max_missing_demo_frac,
+    )
+    if not all_rollout_samples:
+        raise RuntimeError("All rollout samples were dropped because no reward demos matched their prompts.")
 
     train_rollout_samples, eval_rollout_samples = _split_rollout_samples_by_prompt(
         all_rollout_samples,
@@ -224,18 +295,35 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
             % (len(train_rollout_samples), args.reward_update_batch_size)
         )
 
-    eval_demo_tokens, eval_roll_tokens = _build_eval_pairs(
+    eval_demo_tokens, eval_roll_tokens, eval_alignment_stats = _build_eval_pairs(
         eval_rollout_samples,
-        demo_samples_by_prompt,
+        demo_sample_index,
         max_samples=getattr(args, "reward_eval_max_samples", None),
     )
     logger.info(
-        "Prompt-matched reward update: demos=%d train_rollouts=%d eval_rollouts=%d eval_pairs=%d",
+        "Reward update: demos=%d train_rollouts=%d eval_rollouts=%d eval_pairs=%d eval_row_id=%d eval_prompt_fallback=%d eval_missing_row_id=%d eval_legacy=%d",
         len(demo_samples),
         len(train_rollout_samples),
         len(eval_rollout_samples),
         len(eval_demo_tokens),
+        eval_alignment_stats["matched_by_row_id"],
+        eval_alignment_stats["matched_by_prompt_fallback"],
+        eval_alignment_stats["missing_row_id_match"],
+        eval_alignment_stats["legacy_samples_without_source_row_id"],
     )
+    if demo_match_stats["missing"] > 0:
+        logger.warning(
+            "Reward demo matching dropped %d/%d rollout samples (unique_prompts=%d frac=%.4f row_id=%d prompt_fallback=%d missing_row_id=%d legacy=%d) due to missing/empty demos; example=%r",
+            demo_match_stats["missing"],
+            demo_match_stats["total"],
+            demo_match_stats["missing_unique_prompts"],
+            demo_match_stats["missing_frac"],
+            demo_match_stats["matched_by_row_id"],
+            demo_match_stats["matched_by_prompt_fallback"],
+            demo_match_stats["missing_row_id_match"],
+            demo_match_stats["legacy_samples_without_source_row_id"],
+            demo_match_stats["example_prompt"],
+        )
 
     pad_id = tokenizer.pad_token_id
     eval_interval = max(1, num_training_batches // 10)
@@ -249,7 +337,20 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
     for _ in range(args.reward_update_epochs):
         random.shuffle(train_rollout_samples)
         for roll_batch in iter_batches(train_rollout_samples, args.reward_update_batch_size, drop_last=True):
-            demo_batch = [random.choice(demo_samples_by_prompt[s.prompt]) for s in roll_batch]
+            demo_batch = []
+            for rollout_sample in roll_batch:
+                matched_demo = match_token_sample(
+                    rollout_sample,
+                    demo_sample_index,
+                    strict_row_id=True,
+                    random_prompt_fallback=True,
+                )
+                if matched_demo is None:
+                    raise RuntimeError(
+                        "Reward training batch lost its demo match after upfront filtering; "
+                        f"source_row_id={rollout_sample.source_row_id} prompt_prefix={repr((rollout_sample.prompt or '')[:200])}"
+                    )
+                demo_batch.append(matched_demo)
             demo_tokens = [sample.tokens for sample in demo_batch]
             roll_tokens = [sample.tokens for sample in roll_batch]
 
@@ -356,6 +457,8 @@ def update_reward(args, rollout_id: int, rollout_path: str) -> None:
                 "restored_matched_acc": restored_acc,
                 "restored_matched_margin": restored_margin,
                 "eval_curve": eval_results,
+                "demo_match_stats": demo_match_stats,
+                "eval_alignment_stats": eval_alignment_stats,
             },
             indent=2,
         ),

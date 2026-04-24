@@ -20,10 +20,7 @@ _MODEL_MTIME = 0.0
 _LAST_SERVER_ACTIVITY = 0.0
 _MAX_RESPONSE_LEN = int(os.environ.get("SLIME_CUSTOM_RM_MAX_RESPONSE_LEN", "384"))
 _SHORT_RESPONSE_THRESHOLD = 50
-_TRUNCATION_THRESHOLD = int(0.9 * _MAX_RESPONSE_LEN)
 _SHORT_PENALTY = 1.0
-# Keep length shaping symmetric so truncation does not structurally favor short hedge replies.
-_TRUNCATION_PENALTY = 1.0
 _HUMAN_CONTINUATION_PENALTY = 5.0
 _ASSISTANT_PREFIX_PENALTY = 2.0
 _REPETITION_PENALTY_MAX = 3.0
@@ -40,6 +37,34 @@ def _parse_env_float(name: str, default: float) -> float:
         return default
 
 
+_TRUNCATION_THRESHOLD_FRAC = _parse_env_float("SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC", 0.8)
+_TRUNCATION_THRESHOLD_FRAC = min(1.0, max(0.0, _TRUNCATION_THRESHOLD_FRAC))
+_TRUNCATION_THRESHOLD = min(_MAX_RESPONSE_LEN - 1, int(_TRUNCATION_THRESHOLD_FRAC * _MAX_RESPONSE_LEN))
+# Penalize responses that run into the max-length cap so PPO cannot farm reward by
+# drifting toward ever-longer answers. The penalty ramps up near the limit and
+# reaches full strength on true truncation.
+_TRUNCATION_PENALTY = _parse_env_float("SLIME_CUSTOM_RM_TRUNCATION_PENALTY", 2.5)
+# Penalize only zero-token rollouts (immediate-EOS). Legitimate short answers
+# such as "Yes" / "No" / "42" are still 1+ tokens and remain unaffected.
+_EMPTY_RESPONSE_PENALTY = _parse_env_float("SLIME_CUSTOM_RM_EMPTY_RESPONSE_PENALTY", 5.0)
+_DISCLAIMER_PENALTY = _parse_env_float("SLIME_CUSTOM_RM_DISCLAIMER_PENALTY", 3.0)
+_DISCLAIMER_PATTERNS = (
+    "i'm unable",
+    "i cannot",
+    "i can't",
+    "i'm not able",
+    "i am unable",
+    "as an ai",
+    "as a language model",
+    "i don't have personal",
+    "i am not able",
+    "i'm sorry, but",
+    "i don't have the ability",
+    "i don't have access",
+    "i do not have the ability",
+    "i don't have real-time",
+    "i don't have realtime",
+)
 _NON_PRINTING_COUNT_THRESHOLD = int(os.environ.get("SLIME_NON_PRINTING_COUNT_THRESHOLD", "8"))
 _NON_PRINTING_RATIO_THRESHOLD = _parse_env_float("SLIME_NON_PRINTING_RATIO_THRESHOLD", 0.02)
 _NON_PRINTING_PENALTY_MAX = _parse_env_float("SLIME_NON_PRINTING_PENALTY_MAX", 5.0)
@@ -343,10 +368,50 @@ def _worker_loop(base_model, model_path):
 _ARGS_CACHE = [None, None]
 
 
+def _sample_status_value(sample):
+    status = getattr(sample, "status", None)
+    return getattr(status, "value", status)
+
+
+def _empty_response_penalty(sample):
+    response = getattr(sample, "response", None) or ""
+    if not response.strip():
+        return _EMPTY_RESPONSE_PENALTY
+    return 0.0
+
+
+def _disclaimer_penalty(sample):
+    response = getattr(sample, "response", None) or ""
+    head = response[:300].lower()
+    if any(pattern in head for pattern in _DISCLAIMER_PATTERNS):
+        return _DISCLAIMER_PENALTY
+    return 0.0
+
+
+def _truncation_penalty(sample):
+    response_length = int(getattr(sample, "response_length", 0) or 0)
+    if response_length <= 0:
+        return 0.0
+
+    status_value = _sample_status_value(sample)
+    if status_value == "truncated" or response_length >= _MAX_RESPONSE_LEN:
+        return _TRUNCATION_PENALTY
+
+    if response_length <= _TRUNCATION_THRESHOLD:
+        return 0.0
+
+    ramp_width = max(1, _MAX_RESPONSE_LEN - _TRUNCATION_THRESHOLD)
+    near_limit_ratio = (response_length - _TRUNCATION_THRESHOLD) / ramp_width
+    near_limit_ratio = min(1.0, max(0.0, near_limit_ratio))
+    return _TRUNCATION_PENALTY * (near_limit_ratio ** 2)
+
+
 def _apply_reward_shaping(reward, sample):
-    # PPO should optimize the reward model's raw score directly so training,
-    # TB rollout/raw_reward, and reward_eval all share the same target.
-    return reward
+    shaped_reward = reward
+    shaped_reward -= _empty_response_penalty(sample)
+    shaped_reward -= _disclaimer_penalty(sample)
+    shaped_reward -= _truncation_penalty(sample)
+    return shaped_reward
 
 
 def _ensure_worker(args):

@@ -1,9 +1,12 @@
 import json
+import random
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
 import torch
 
+from slime.utils.data import read_file_with_source_row_ids
 from slime.utils.types import Sample
 from slime.utils.text_hygiene import count_non_printing_chars
 
@@ -16,6 +19,88 @@ class TokenSample:
     response_length: int
     prompt: str | None = None
     raw_prompt: str | None = None
+    source_row_id: int | None = None
+
+
+@dataclass
+class TokenSampleIndex:
+    by_source_row_id: dict[int, list[TokenSample]]
+    by_prompt: dict[str, list[TokenSample]]
+
+
+def coerce_source_row_id(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_sample_source_row_id(sample: Sample) -> int | None:
+    metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
+    return coerce_source_row_id(metadata.get("source_row_id"))
+
+
+def init_alignment_stats() -> dict[str, int]:
+    return {
+        "matched_by_row_id": 0,
+        "matched_by_prompt_fallback": 0,
+        "missing_row_id_match": 0,
+        "legacy_samples_without_source_row_id": 0,
+    }
+
+
+def build_token_sample_index(samples: list[TokenSample]) -> TokenSampleIndex:
+    by_source_row_id = defaultdict(list)
+    by_prompt = defaultdict(list)
+    for sample in samples:
+        if sample.source_row_id is not None:
+            by_source_row_id[sample.source_row_id].append(sample)
+        if sample.prompt is not None:
+            by_prompt[sample.prompt].append(sample)
+    return TokenSampleIndex(
+        by_source_row_id=dict(by_source_row_id),
+        by_prompt=dict(by_prompt),
+    )
+
+
+def match_token_sample(
+    sample: TokenSample,
+    sample_index: TokenSampleIndex,
+    *,
+    strict_row_id: bool,
+    random_prompt_fallback: bool = False,
+    stats: dict[str, int] | None = None,
+) -> TokenSample | None:
+    row_id = sample.source_row_id
+    if row_id is not None:
+        matches = sample_index.by_source_row_id.get(row_id)
+        if matches:
+            if stats is not None:
+                stats["matched_by_row_id"] = stats.get("matched_by_row_id", 0) + 1
+            return matches[0]
+        if stats is not None:
+            stats["missing_row_id_match"] = stats.get("missing_row_id_match", 0) + 1
+        if strict_row_id:
+            return None
+    else:
+        if stats is not None:
+            stats["legacy_samples_without_source_row_id"] = stats.get("legacy_samples_without_source_row_id", 0) + 1
+
+    if sample.prompt is None:
+        return None
+
+    prompt_matches = sample_index.by_prompt.get(sample.prompt)
+    if not prompt_matches:
+        return None
+
+    if stats is not None:
+        stats["matched_by_prompt_fallback"] = stats.get("matched_by_prompt_fallback", 0) + 1
+
+    if random_prompt_fallback and len(prompt_matches) > 1:
+        return random.choice(prompt_matches)
+    return prompt_matches[0]
 
 
 def _sample_is_empty(sample: Sample) -> bool:
@@ -53,6 +138,7 @@ def load_demo_samples(
     answer_key: str = "answer",
     apply_chat_template: bool = False,
     apply_chat_template_kwargs: dict | None = None,
+    source_row_id_filter: set[int] | None = None,
     prompt_filter: set[str] | None = None,
 ) -> list[TokenSample]:
     return load_prompt_answer_samples(
@@ -62,6 +148,7 @@ def load_demo_samples(
         answer_key=answer_key,
         apply_chat_template=apply_chat_template,
         apply_chat_template_kwargs=apply_chat_template_kwargs,
+        source_row_id_filter=source_row_id_filter,
         prompt_filter=prompt_filter,
     )
 
@@ -73,42 +160,48 @@ def load_prompt_answer_samples(
     answer_key: str = "answer",
     apply_chat_template: bool = False,
     apply_chat_template_kwargs: dict | None = None,
+    source_row_id_filter: set[int] | None = None,
     prompt_filter: set[str] | None = None,
 ) -> list[TokenSample]:
     samples: list[TokenSample] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
+    for fallback_row_id, item in read_file_with_source_row_ids(path):
+        prompt = item[prompt_key]
+        answer = item[answer_key]
+        source_row_id = coerce_source_row_id(item.get("source_row_id"))
+        if source_row_id is None:
+            source_row_id = fallback_row_id
+        prompt_text = build_prompt_text(
+            tokenizer,
+            prompt,
+            apply_chat_template=apply_chat_template,
+            apply_chat_template_kwargs=apply_chat_template_kwargs,
+        )
+        if source_row_id_filter is not None or prompt_filter is not None:
+            matched_filter = False
+            if source_row_id_filter is not None and source_row_id in source_row_id_filter:
+                matched_filter = True
+            if prompt_filter is not None and prompt_text in prompt_filter:
+                matched_filter = True
+            if not matched_filter:
                 continue
-            item = json.loads(line)
-            prompt = item[prompt_key]
-            answer = item[answer_key]
-            prompt_text = build_prompt_text(
-                tokenizer,
-                prompt,
-                apply_chat_template=apply_chat_template,
-                apply_chat_template_kwargs=apply_chat_template_kwargs,
+        demo = tokenize_prompt_answer(
+            tokenizer,
+            prompt=prompt,
+            answer=answer,
+            apply_chat_template=apply_chat_template,
+            apply_chat_template_kwargs=apply_chat_template_kwargs,
+        )
+        if demo.response_length <= 0:
+            continue
+        samples.append(
+            TokenSample(
+                tokens=demo.tokens,
+                response_length=demo.response_length,
+                prompt=prompt_text,
+                raw_prompt=prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False),
+                source_row_id=source_row_id,
             )
-            if prompt_filter is not None and prompt_text not in prompt_filter:
-                continue
-            demo = tokenize_prompt_answer(
-                tokenizer,
-                prompt=prompt,
-                answer=answer,
-                apply_chat_template=apply_chat_template,
-                apply_chat_template_kwargs=apply_chat_template_kwargs,
-            )
-            if demo.response_length <= 0:
-                continue
-            samples.append(
-                TokenSample(
-                    tokens=demo.tokens,
-                    response_length=demo.response_length,
-                    prompt=prompt_text,
-                    raw_prompt=prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False),
-                )
-            )
+        )
     return samples
 
 
@@ -121,7 +214,14 @@ def load_rollout_samples(rollout_path: str) -> list[TokenSample]:
         if not sample.tokens or sample.response_length <= 0:
             continue
         prompt = sample.prompt if isinstance(sample.prompt, str) else json.dumps(sample.prompt, ensure_ascii=False)
-        samples.append(TokenSample(tokens=sample.tokens, response_length=sample.response_length, prompt=prompt))
+        samples.append(
+            TokenSample(
+                tokens=sample.tokens,
+                response_length=sample.response_length,
+                prompt=prompt,
+                source_row_id=get_sample_source_row_id(sample),
+            )
+        )
     return samples
 
 

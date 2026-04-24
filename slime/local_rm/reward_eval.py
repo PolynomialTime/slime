@@ -2,13 +2,17 @@ import json
 import logging
 import os
 import random
-from collections import defaultdict
 from pathlib import Path
 
 import torch
 from tqdm import tqdm
 
-from .data import load_prompt_answer_samples
+from .data import (
+    build_token_sample_index,
+    init_alignment_stats,
+    load_prompt_answer_samples,
+    match_token_sample,
+)
 from .model import get_sequence_rewards, init_reward_model, load_tokenizer
 
 try:
@@ -20,17 +24,6 @@ except ImportError:
     _HAS_TB = False
 
 logger = logging.getLogger(__name__)
-
-
-def _build_prompt_index(samples):
-    prompt_to_samples = defaultdict(list)
-    for sample in samples:
-        if sample.prompt is None:
-            continue
-        prompt_to_samples[sample.prompt].append(sample)
-    return prompt_to_samples
-
-
 def _reward_tb_dir(reward_dir: Path, rollout_id: int) -> Path:
     slime_root = reward_dir.parents[1] if len(reward_dir.parents) >= 2 else reward_dir.parent
     round_id = os.environ.get("ROUND_ID", str(rollout_id))
@@ -102,18 +95,26 @@ def reward_eval(args, rollout_id: int) -> None:
             apply_chat_template=args.apply_chat_template,
             apply_chat_template_kwargs=args.apply_chat_template_kwargs,
         )
-    target_index = _build_prompt_index(target_samples)
+    target_index = build_token_sample_index(target_samples)
 
     positive_tokens: list[list[int]] = []
     target_tokens: list[list[int]] = []
     missing = 0
+    alignment_stats = init_alignment_stats()
+    strict_row_id = not bool(target_path)
     for sample in positive_samples:
-        matches = target_index.get(sample.prompt)
-        if not matches:
+        matched_target = match_token_sample(
+            sample,
+            target_index,
+            strict_row_id=strict_row_id,
+            random_prompt_fallback=False,
+            stats=alignment_stats,
+        )
+        if matched_target is None:
             missing += 1
             continue
         positive_tokens.append(sample.tokens)
-        target_tokens.append(matches[0].tokens)
+        target_tokens.append(matched_target.tokens)
 
     total = len(positive_tokens)
     if total == 0:
@@ -148,7 +149,7 @@ def reward_eval(args, rollout_id: int) -> None:
     margin = margin_sum / total
     eval_source = getattr(args, "reward_eval_source", None) or "external"
     logger.info(
-        "reward_eval rollout=%s source=%s samples=%s acc=%.4f margin=%.4f positive_path=%s target_path=%s missing=%s model_path=%s",
+        "reward_eval rollout=%s source=%s samples=%s acc=%.4f margin=%.4f positive_path=%s target_path=%s missing=%s matched_by_row_id=%s prompt_fallback=%s missing_row_id_match=%s legacy=%s model_path=%s",
         rollout_id,
         eval_source,
         total,
@@ -157,6 +158,10 @@ def reward_eval(args, rollout_id: int) -> None:
         eval_path,
         target_path,
         missing,
+        alignment_stats["matched_by_row_id"],
+        alignment_stats["matched_by_prompt_fallback"],
+        alignment_stats["missing_row_id_match"],
+        alignment_stats["legacy_samples_without_source_row_id"],
         model_path,
     )
 
@@ -175,6 +180,7 @@ def reward_eval(args, rollout_id: int) -> None:
                 "positive": len(positive_samples),
                 "targets": len(target_samples),
                 "missing": missing,
+                "alignment_stats": alignment_stats,
                 "model_path": str(model_path),
                 "positive_path": eval_path,
                 "target_path": target_path or eval_path,
