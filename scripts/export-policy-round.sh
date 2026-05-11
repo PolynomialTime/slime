@@ -32,6 +32,8 @@ ROUND_POLICY_HF="${ROUND_POLICY_HF:-$SLIME/models/policy_r${ROUND}_hf}"
 ROUND_OUTPUT="${ROUND_OUTPUT:-$SLIME/eval/outputs_policy_r${ROUND}.jsonl}"
 ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8B-base}"
 SGLANG_PORT="${SGLANG_PORT:-30010}"
+SGLANG_CUDA_VISIBLE_DEVICES="${SGLANG_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+SGLANG_TP="${SGLANG_TP:-4}"
 EVAL_TEMPERATURE="${EVAL_TEMPERATURE:-0.0}"
 MIN_FREE_DISK_GB="${MIN_FREE_DISK_GB:-}"
 MIN_FREE_DISK_GB_EXPORT="${MIN_FREE_DISK_GB_EXPORT:-${MIN_FREE_DISK_GB:-30}}"
@@ -99,10 +101,10 @@ generate_with_sglang() {
   local output_path=$2
 
   echo "Starting SGLang server on port $SGLANG_PORT for $model_path"
-  CUDA_VISIBLE_DEVICES=0,1,2,3 python3 -m sglang.launch_server \
+  CUDA_VISIBLE_DEVICES="$SGLANG_CUDA_VISIBLE_DEVICES" python3 -m sglang.launch_server \
     --model-path "$model_path" \
     --port "$SGLANG_PORT" \
-    --tp 4 \
+    --tp "$SGLANG_TP" \
     --host 127.0.0.1 \
     --trust-remote-code &
   local sglang_pid=$!

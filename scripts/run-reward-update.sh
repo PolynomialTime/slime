@@ -105,6 +105,11 @@ EOF
 
 echo "=== Reward Update Phase (round $ROUND_ID, rollout_end=$ROLLOUT_END, batch=$REWARD_UPDATE_BATCH_SIZE, log=$RUN_LOG) ==="
 
+# Temporarily disable `set -e` around accelerate launch: NCCL process-group
+# teardown on exit can abort with SIGABRT (exit code -6 / 134) AFTER training
+# has completed and checkpoints were saved. We judge success by on-disk
+# artifacts, not by the child exit code.
+set +e
 TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG:-DETAIL} \
 PYTHONFAULTHANDLER=1 \
 TORCH_SHOW_CPP_STACKTRACES=1 \
@@ -115,5 +120,34 @@ ROUND_ID=${ROUND_ID:-0} accelerate launch \
   --args-json $ARGS_JSON \
   --rollout-id $ROLLOUT_END \
   --rollout-path $SLIME/rollout/rollout_${ROLLOUT_END}.pt
+ACCEL_EXIT=$?
+set -e
 
-echo "=== Reward Update Phase completed ==="
+REWARD_EVAL_JSON=$REWARD_DIR/reward_eval_round_${ROUND_ID}.json
+REWARD_SNAPSHOT_DIR=$REWARD_DIR/step_round${ROUND_ID}
+REWARD_LATEST_DIR=$REWARD_DIR/latest
+
+_artifacts_complete() {
+  [ -f "$REWARD_EVAL_JSON" ] && \
+    [ -f "$REWARD_SNAPSHOT_DIR/config.json" ] && \
+    { [ -f "$REWARD_SNAPSHOT_DIR/pytorch_model.bin" ] || [ -f "$REWARD_SNAPSHOT_DIR/pytorch_model.bin.index.json" ]; } && \
+    [ -f "$REWARD_LATEST_DIR/config.json" ] && \
+    { [ -f "$REWARD_LATEST_DIR/pytorch_model.bin" ] || [ -f "$REWARD_LATEST_DIR/pytorch_model.bin.index.json" ]; }
+}
+
+if [ "$ACCEL_EXIT" -eq 0 ]; then
+  echo "=== Reward Update Phase completed (clean exit) ==="
+elif _artifacts_complete; then
+  echo "=== Reward Update Phase: accelerate exited non-zero (code=$ACCEL_EXIT) but all artifacts are present ==="
+  echo "    This is almost certainly a NCCL process-group teardown abort after training finished."
+  echo "    eval_json:     $REWARD_EVAL_JSON"
+  echo "    snapshot_dir:  $REWARD_SNAPSHOT_DIR"
+  echo "    latest_dir:    $REWARD_LATEST_DIR"
+  echo "    Treating as SUCCESS."
+else
+  echo "ERROR: accelerate exited non-zero (code=$ACCEL_EXIT) AND reward artifacts are incomplete." >&2
+  echo "       eval_json exists:    $([ -f "$REWARD_EVAL_JSON" ] && echo yes || echo NO)" >&2
+  echo "       snapshot config.json:$([ -f "$REWARD_SNAPSHOT_DIR/config.json" ] && echo yes || echo NO)" >&2
+  echo "       latest  config.json: $([ -f "$REWARD_LATEST_DIR/config.json" ] && echo yes || echo NO)" >&2
+  exit "$ACCEL_EXIT"
+fi
