@@ -70,103 +70,6 @@ _NON_PRINTING_RATIO_THRESHOLD = _parse_env_float("SLIME_NON_PRINTING_RATIO_THRES
 _NON_PRINTING_PENALTY_MAX = _parse_env_float("SLIME_NON_PRINTING_PENALTY_MAX", 5.0)
 _IDLE_TIMEOUT_SEC = max(0.0, _parse_env_float("SLIME_CUSTOM_RM_IDLE_TIMEOUT_SEC", 0.0))
 
-# ---------- Rubric (multi-source) reward shaping ----------
-# When SLIME_RUBRIC_ENABLED=1, the final reward becomes:
-#   final = w_irl * r_irl
-#         + w_format * format_score(response)
-#         + w_answer * answer_score(response, label)
-#         - existing penalties (truncation/empty/disclaimer)
-# Designed for math IRL: the IRL learned RM still drives reasoning quality;
-# format/answer act as rule-based regularizers to prevent reward hacking
-# (e.g. \boxed{x = 4/9} polluting answer extraction).
-_RUBRIC_ENABLED = (os.environ.get("SLIME_RUBRIC_ENABLED", "0").strip() in {"1", "true", "True"})
-_RUBRIC_W_IRL = _parse_env_float("SLIME_RUBRIC_W_IRL", 1.0)
-_RUBRIC_W_FORMAT = _parse_env_float("SLIME_RUBRIC_W_FORMAT", 0.5)
-_RUBRIC_W_ANSWER = _parse_env_float("SLIME_RUBRIC_W_ANSWER", 1.0)
-_RUBRIC_LOG_EVERY = int(os.environ.get("SLIME_RUBRIC_LOG_EVERY", "256"))
-_RUBRIC_CALL_COUNTER = 0
-
-_BOXED_RE = None  # lazy-compiled
-_MATH_GRADER = None  # lazy-loaded module (avoids ray/aiohttp via package __init__)
-
-
-def _load_math_grader():
-    """Lazy-load math_utils bypassing slime.rollout.rm_hub.__init__ to avoid
-    pulling ray/aiohttp into the custom_rm subprocess that doesn't need them.
-    """
-    global _MATH_GRADER, _BOXED_RE
-    if _MATH_GRADER is not None:
-        return _MATH_GRADER
-    import importlib.util
-    import re as _re
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    module_path = os.path.join(repo_root, "slime", "rollout", "rm_hub", "math_utils.py")
-    spec = importlib.util.spec_from_file_location("_math_grader_standalone", module_path)
-    if spec is None or spec.loader is None:
-        logger.warning("[rubric] cannot load math_utils from %s; rule rewards will return 0", module_path)
-        _MATH_GRADER = False  # sentinel: load failed, do not retry
-        return False
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        logger.warning("[rubric] math_utils load failed: %s; rule rewards will return 0", e)
-        _MATH_GRADER = False
-        return False
-    _MATH_GRADER = module
-    _BOXED_RE = _re.compile(r"\\boxed\s*\{")
-    return module
-
-
-def _format_score(response: str) -> float:
-    """Return a [0, 1] score for output format quality.
-
-    1.0  exactly one \\boxed{...} AND content has no '=' (clean LHS)
-    0.5  has \\boxed{...} but content contains '=' (LHS=RHS pollution)
-         OR has multiple \\boxed{...} (forces single decisive answer)
-    0.0  no \\boxed{...} at all
-    """
-    if not response:
-        return 0.0
-    grader = _load_math_grader()
-    if not grader:
-        return 0.0
-    matches = list(_BOXED_RE.finditer(response))
-    if not matches:
-        return 0.0
-    if len(matches) > 1:
-        return 0.5
-    # Use math_utils.last_boxed_only_string + remove_boxed for brace-aware extraction
-    try:
-        boxed_str = grader.last_boxed_only_string(response)
-        content = grader.remove_boxed(boxed_str) if boxed_str else None
-    except Exception:
-        content = None
-    if content is None:
-        return 0.5  # found token but failed brace-balanced extraction
-    return 0.5 if "=" in content else 1.0
-
-
-def _answer_score(response: str, label) -> float:
-    """Return 1.0 if grade_answer_verl judges the response correct, else 0.0.
-
-    Returns 0.0 when label is None/empty (e.g. UF mode), no boxed extractable,
-    or any grader exception (so a broken sample never crashes PPO).
-    """
-    if response is None or label is None:
-        return 0.0
-    label_str = str(label).strip()
-    if not label_str:
-        return 0.0
-    grader = _load_math_grader()
-    if not grader:
-        return 0.0
-    try:
-        return 1.0 if bool(grader.grade_answer_verl(response, label_str)) else 0.0
-    except Exception:
-        return 0.0
-# ---------------------------------------------------------
-
 
 def _parse_visible_device_list(raw_value: str) -> list[str]:
     return [item.strip() for item in raw_value.split(",") if item.strip()]
@@ -504,27 +407,7 @@ def _truncation_penalty(sample):
 
 
 def _apply_reward_shaping(reward, sample):
-    global _RUBRIC_CALL_COUNTER
-    if _RUBRIC_ENABLED:
-        irl_component = _RUBRIC_W_IRL * reward
-        response = getattr(sample, "response", None) or ""
-        label = getattr(sample, "label", None)
-        fmt = _format_score(response)
-        ans = _answer_score(response, label)
-        format_component = _RUBRIC_W_FORMAT * fmt
-        answer_component = _RUBRIC_W_ANSWER * ans
-        shaped_reward = irl_component + format_component + answer_component
-        _RUBRIC_CALL_COUNTER += 1
-        if _RUBRIC_LOG_EVERY > 0 and (_RUBRIC_CALL_COUNTER % _RUBRIC_LOG_EVERY) == 1:
-            logger.info(
-                "[rubric] sample#%d r_irl=%.4f w_irl*r=%.4f fmt=%.2f w_fmt*fmt=%.4f "
-                "ans=%.2f w_ans*ans=%.4f shaped=%.4f label_present=%s",
-                _RUBRIC_CALL_COUNTER, float(reward), irl_component,
-                fmt, format_component, ans, answer_component, shaped_reward,
-                label is not None,
-            )
-    else:
-        shaped_reward = reward
+    shaped_reward = reward
     shaped_reward -= _empty_response_penalty(sample)
     shaped_reward -= _disclaimer_penalty(sample)
     shaped_reward -= _truncation_penalty(sample)

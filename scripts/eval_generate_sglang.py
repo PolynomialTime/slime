@@ -39,7 +39,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=600)
-QWEN_STOP_TOKEN_IDS = [151643, 151644, 151645]
+DEFAULT_QWEN_STOP_TOKEN_IDS = [151643, 151644, 151645]
 
 
 def response_is_empty(text: str) -> bool:
@@ -56,8 +56,20 @@ def response_has_assistant_prefix(text: str) -> bool:
     return prefix.startswith("assistant") or prefix.startswith("<|im_start|>assistant")
 
 
-def response_is_eos_only(text: str, response_tokens: list[int]) -> bool:
-    return bool(response_tokens) and response_is_empty(text) and all(token in QWEN_STOP_TOKEN_IDS for token in response_tokens)
+def response_is_eos_only(text: str, response_tokens: list[int], stop_token_ids: set[int]) -> bool:
+    return bool(response_tokens) and response_is_empty(text) and all(token in stop_token_ids for token in response_tokens)
+
+
+def resolve_stop_token_ids(tokenizer, override: str | None = None) -> list[int]:
+    if override:
+        return [int(x) for x in override.replace(",", " ").split() if x.strip()]
+
+    token_ids = []
+    for token in ("<|endoftext|>", "<|im_start|>", "<|im_end|>"):
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if isinstance(token_id, int) and token_id >= 0 and token_id not in token_ids:
+            token_ids.append(token_id)
+    return token_ids or DEFAULT_QWEN_STOP_TOKEN_IDS
 
 
 def load_prompts(path: str, prompt_key: str, apply_chat_template: bool, tokenizer=None, chat_template_kwargs=None) -> list[str]:
@@ -107,14 +119,14 @@ async def wait_for_sglang_ready(session, url: str, timeout_s: int = 180):
     raise RuntimeError(f"SGLang at {url} was not ready after {timeout_s}s ({last_error})")
 
 
-async def generate_one(session, url, prompt, max_tokens, temperature, semaphore):
+async def generate_one(session, url, prompt, max_tokens, temperature, semaphore, stop_token_ids):
     async with semaphore:
         payload = {
             "text": prompt,
             "sampling_params": {
                 "max_new_tokens": max_tokens,
                 "temperature": temperature,
-                "stop_token_ids": QWEN_STOP_TOKEN_IDS,
+                "stop_token_ids": stop_token_ids,
                 "skip_special_tokens": True,
             },
             "return_logprob": True,
@@ -155,6 +167,8 @@ async def generate_one(session, url, prompt, max_tokens, temperature, semaphore)
 async def run(args):
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
+    stop_token_ids = resolve_stop_token_ids(tokenizer, args.stop_token_ids)
+    stop_token_id_set = set(stop_token_ids)
 
     chat_template_kwargs = None
     if args.apply_chat_template_kwargs:
@@ -165,10 +179,11 @@ async def run(args):
     )
 
     logger.info(
-        "Generating %d responses via SGLang at %s (temperature=%.3f)",
+        "Generating %d responses via SGLang at %s (temperature=%.3f stop_token_ids=%s)",
         len(formatted_prompts),
         args.sglang_url,
         args.temperature,
+        stop_token_ids,
     )
 
     semaphore = asyncio.Semaphore(args.concurrency)
@@ -176,7 +191,7 @@ async def run(args):
 
     async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
         await wait_for_sglang_ready(session, args.sglang_url)
-        tasks = [generate_one(session, args.sglang_url, p, args.max_new_tokens, args.temperature, semaphore)
+        tasks = [generate_one(session, args.sglang_url, p, args.max_new_tokens, args.temperature, semaphore, stop_token_ids)
                  for p in formatted_prompts]
         from tqdm.asyncio import tqdm as async_tqdm
         response_records = await async_tqdm.gather(*tasks, desc="generating")
@@ -207,7 +222,7 @@ async def run(args):
     response_records = sanitized_records
     responses = [record["text"] for record in response_records]
     empty_count = sum(response_is_empty(r) for r in responses)
-    eos_only_count = sum(response_is_eos_only(record["text"], record["response_tokens"]) for record in response_records)
+    eos_only_count = sum(response_is_eos_only(record["text"], record["response_tokens"], stop_token_id_set) for record in response_records)
     user_prefix_count = sum(response_has_user_prefix(r) for r in responses)
     assistant_prefix_count = sum(response_has_assistant_prefix(r) for r in responses)
     if non_printing_rows_raw:
@@ -233,7 +248,7 @@ async def run(args):
             if anomaly_budget <= 0:
                 break
             if not (
-                response_is_eos_only(text, record["response_tokens"])
+                response_is_eos_only(text, record["response_tokens"], stop_token_id_set)
                 or response_has_user_prefix(text)
                 or response_has_assistant_prefix(text)
                 or response_is_empty(text)
@@ -269,6 +284,8 @@ def main():
     parser.add_argument("--apply-chat-template", action="store_true")
     parser.add_argument("--apply-chat-template-kwargs", type=str, default=None,
                         help='JSON string, e.g. \'{"enable_thinking":false}\'')
+    parser.add_argument("--stop-token-ids", type=str, default=None,
+                        help="Optional whitespace/comma-separated token ids. Defaults to tokenizer special Qwen ids.")
     parser.add_argument("--concurrency", type=int, default=256)
     args = parser.parse_args()
     asyncio.run(run(args))

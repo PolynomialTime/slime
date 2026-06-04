@@ -193,20 +193,35 @@ _examples_synced/
 .env
 .DS_Store
 
-hh*/
-models/
-rollout/
+/hh*/
+/models/
+/rollout/
 CLAUDE.md
 .claude/*
 
-execute*
-hh*
-data/*
-tensorboard*
-eval*
-eval/*
-ultra*
-logs/*
+/execute*
+/hh*
+/data/*
+/tensorboard*
+/eval*
+/eval/*
+/ultra*
+/logs/*
 
-numinamath/*
-math*
+/numinamath/*
+/math*
+
+# Local ML experiment artifacts
+/mtbench_hf/
+/qwen35_uf_grpo_plugin_target73f_kqt4f/
+/qwen35_uf_ppo_worker7zdh8/
+cleanup_*.txt
+
+# Model weights / checkpoints
+*.safetensors
+*.distcp
+*.pt
+*.pth
+*.bin
+*.ckpt
+events.out.tfevents.*

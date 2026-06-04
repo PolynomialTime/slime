@@ -23,20 +23,24 @@ set -ex
 SLIME=${SLIME:-/mnt/shared-storage-gpfs2/wangqianyi2/slime}
 cd $SLIME
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
+ROLLOUT_DIR=${ROLLOUT_DIR:-$SLIME/rollout}
 
 ROUND_ID=${ROUND_ID:-0}
 ROLLOUT_END=${ROLLOUT_END:-335}
 NUM_ROLLOUT_PER_ROUND=${NUM_ROLLOUT_PER_ROUND:-336}
+REWARD_UPDATE_NUM_PROCESSES=${REWARD_UPDATE_NUM_PROCESSES:-8}
 REWARD_TRAIN_DATA_PATH=${REWARD_TRAIN_DATA_PATH:-${REWARD_TRAIN_SYNTH_PATH:-$ULTRAFEEDBACK_DIR/uf-train-synth-prefs-clean.jsonl}}
 REWARD_EVAL_PATH=${REWARD_EVAL_PATH:-}
 REWARD_EVAL_TARGET_PATH=${REWARD_EVAL_TARGET_PATH:-}
 REWARD_EVAL_REJECTED_KEY=${REWARD_EVAL_REJECTED_KEY:-}
 REWARD_EVAL_HOLDOUT_RATIO=${REWARD_EVAL_HOLDOUT_RATIO:-0.1}
 REWARD_EVAL_MAX_SAMPLES=${REWARD_EVAL_MAX_SAMPLES:-0}
+REWARD_EVAL_INTERVAL=${REWARD_EVAL_INTERVAL:-}
 REWARD_EVAL_SHUFFLE_SEED=${REWARD_EVAL_SHUFFLE_SEED:-42}
 REWARD_EVAL_BATCH_SIZE=${REWARD_EVAL_BATCH_SIZE:-32}
 REWARD_UPDATE_BATCH_SIZE=${REWARD_UPDATE_BATCH_SIZE:-4}
 REWARD_UPDATE_EPOCHS=${REWARD_UPDATE_EPOCHS:-1}
+REWARD_UPDATE_ROLLOUT_WINDOW=${REWARD_UPDATE_ROLLOUT_WINDOW:-150}
 REWARD_ONLINE_PREF_WEIGHT=${REWARD_ONLINE_PREF_WEIGHT:-1.0}
 REWARD_MODEL_INIT_JSON=null
 if [ -n "$REWARD_MODEL_INIT" ]; then
@@ -87,8 +91,8 @@ cat > $ARGS_JSON <<EOF
   "target_reward_l2_norm": 0.6,
   "apply_chat_template": true,
   "apply_chat_template_kwargs": {"enable_thinking": false},
-  "save_debug_rollout_data": "$SLIME/rollout/rollout_{rollout_id}.pt",
-  "reward_update_rollout_window": 150,
+  "save_debug_rollout_data": "$ROLLOUT_DIR/rollout_{rollout_id}.pt",
+  "reward_update_rollout_window": $REWARD_UPDATE_ROLLOUT_WINDOW,
   "reward_eval_path": "$REWARD_EVAL_PATH",
   "reward_eval_prompt_key": "text",
   "reward_eval_chosen_key": "chosen",
@@ -98,6 +102,7 @@ cat > $ARGS_JSON <<EOF
   "reward_eval_target_answer_key": "response",
   "reward_eval_holdout_ratio": $REWARD_EVAL_HOLDOUT_RATIO,
   "reward_eval_max_samples": $REWARD_EVAL_MAX_SAMPLES_JSON,
+  "reward_eval_interval": ${REWARD_EVAL_INTERVAL:-null},
   "reward_eval_shuffle_seed": $REWARD_EVAL_SHUFFLE_SEED,
   "reward_eval_batch_size": $REWARD_EVAL_BATCH_SIZE
 }
@@ -113,13 +118,14 @@ set +e
 TORCH_DISTRIBUTED_DEBUG=${TORCH_DISTRIBUTED_DEBUG:-DETAIL} \
 PYTHONFAULTHANDLER=1 \
 TORCH_SHOW_CPP_STACKTRACES=1 \
+TORCH_DISABLE_ADDR2LINE=${TORCH_DISABLE_ADDR2LINE:-1} \
 ROUND_ID=${ROUND_ID:-0} accelerate launch \
-  --num_processes 8 \
+  --num_processes $REWARD_UPDATE_NUM_PROCESSES \
   --mixed_precision bf16 \
   -m slime.local_rm.update_reward_accel \
   --args-json $ARGS_JSON \
   --rollout-id $ROLLOUT_END \
-  --rollout-path $SLIME/rollout/rollout_${ROLLOUT_END}.pt
+  --rollout-path $ROLLOUT_DIR/rollout_${ROLLOUT_END}.pt
 ACCEL_EXIT=$?
 set -e
 

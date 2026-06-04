@@ -7,6 +7,7 @@ import shutil
 import time
 
 
+from safetensors import safe_open
 import safetensors.torch
 import torch
 import torch.distributed.checkpoint as dist_cp
@@ -103,7 +104,35 @@ def get_named_params(args, state_dict):
         yield from get_layer_param(args, name, param)
 
 
-def save_tensors(args, model_name, state_dict, output_dir, chunk_size, vocab_size=None):
+def _append_qwen35_static_tensors(modeltensors, metadata, origin_hf_dir, chunk_size):
+    """Carry over Qwen3.5 vision/MTP tensors that Megatron language training does not own."""
+    if not origin_hf_dir:
+        return 0, 0
+    index_path = os.path.join(origin_hf_dir, "model.safetensors.index.json")
+    if not os.path.exists(index_path):
+        return 0, 0
+
+    with open(index_path, "r", encoding="utf-8") as f:
+        weight_map = json.load(f)["weight_map"]
+    static_keys = [k for k in weight_map if k.startswith("model.visual.") or k.startswith("mtp.")]
+    added_size = 0
+    added_count = 0
+    for key in static_keys:
+        filename = weight_map[key]
+        with safe_open(os.path.join(origin_hf_dir, filename), framework="pt", device="cpu") as sf:
+            tensor = sf.get_tensor(key)
+        tensor_size = tensor.numel() * tensor.element_size()
+        current_size = sum(v.numel() * v.element_size() for v in modeltensors[-1].values())
+        if tensor_size + current_size > chunk_size:
+            modeltensors.append({})
+        modeltensors[-1][key] = tensor
+        added_size += tensor_size
+        added_count += 1
+    metadata["metadata"]["total_size"] += added_size
+    return added_count, added_size
+
+
+def save_tensors(args, model_name, state_dict, output_dir, chunk_size, vocab_size=None, origin_hf_dir=None):
     # for slime update_weight compatible
     args.sglang_enable_ep_moe = False
 
@@ -127,6 +156,9 @@ def save_tensors(args, model_name, state_dict, output_dir, chunk_size, vocab_siz
             total_size += tensor_size
 
     metadata = {"metadata": {"total_size": total_size}, "weight_map": {}}
+    if "qwen3_5" in model_name or "qwen35" in model_name:
+        added_count, added_size = _append_qwen35_static_tensors(modeltensors, metadata, origin_hf_dir, chunk_size)
+        print(f"carried over Qwen3.5 static tensors: count={added_count} bytes={added_size}")
 
     num_files = len(modeltensors)
     for i, tensors in enumerate(modeltensors):
@@ -210,7 +242,15 @@ if __name__ == "__main__":
     )
     print(f"model loaded in {time.time()-t:.2f} sec.")
 
-    save_tensors(megatron_args, args.model_name, state_dict, args.output_dir, args.chunk_size, args.vocab_size)
+    save_tensors(
+        megatron_args,
+        args.model_name,
+        state_dict,
+        args.output_dir,
+        args.chunk_size,
+        args.vocab_size,
+        args.origin_hf_dir,
+    )
 
     if args.origin_hf_dir:
         copy_assets(args.origin_hf_dir, args.output_dir)

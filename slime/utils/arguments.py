@@ -10,8 +10,11 @@ from transformers import AutoConfig
 
 from slime.backends.sglang_utils.arguments import add_sglang_arguments
 from slime.backends.sglang_utils.arguments import validate_args as sglang_validate_args
+from slime_plugins.transformers_compat import register_extra_configs
 from slime.utils.eval_config import EvalDatasetConfig, build_eval_dataset_configs, ensure_dataset_list
 from slime.utils.logging_utils import configure_logger
+
+register_extra_configs()
 
 logger = logging.getLogger(__name__)
 
@@ -1733,6 +1736,9 @@ def hf_validate_args(args, hf_config):
     # multimodal models have different config structure
     if hasattr(hf_config, "text_config"):
         hf_config = hf_config.text_config
+    rope_parameters = getattr(hf_config, "rope_parameters", None) or getattr(hf_config, "rope_scaling", None)
+    if isinstance(rope_parameters, dict) and rope_parameters.get("rope_theta") is not None:
+        hf_config.rope_theta = rope_parameters["rope_theta"]
 
     for hf_config_name, megatron_config_name, compare_fn in [
         ("hidden_size", "hidden_size", equal),

@@ -16,6 +16,9 @@ SLIME="${SLIME:-/mnt/shared-storage-gpfs2/wangqianyi2/slime}"
 cd "$SLIME"
 export PYTHONPATH="$SLIME${PYTHONPATH:+:$PYTHONPATH}"
 ULTRAFEEDBACK_DIR="${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}"
+MODEL_ROOT="${MODEL_ROOT:-$SLIME/models}"
+MODEL_NAME_FOR_EXPORT="${MODEL_NAME_FOR_EXPORT:-}"
+EVAL_DIR="${EVAL_DIR:-$SLIME/eval}"
 
 TEST_DATA="${TEST_DATA:-$ULTRAFEEDBACK_DIR/uf-test.jsonl}"
 EXPECTED_EVAL_LINES="${EXPECTED_EVAL_LINES:-2000}"
@@ -26,14 +29,15 @@ if [ -f "$TEST_DATA" ]; then
   fi
 fi
 
-SFT_HF_DIR="${SFT_HF_DIR:-$SLIME/models/sft_checkpoint_8b_hf}"
-ROUND_SAVE_DIR="${ROUND_SAVE_DIR:-$SLIME/models/save_dir_r${ROUND}}"
-ROUND_POLICY_HF="${ROUND_POLICY_HF:-$SLIME/models/policy_r${ROUND}_hf}"
-ROUND_OUTPUT="${ROUND_OUTPUT:-$SLIME/eval/outputs_policy_r${ROUND}.jsonl}"
-ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$SLIME/models/qwen3-8B-base}"
+SFT_HF_DIR="${SFT_HF_DIR:-$MODEL_ROOT/sft_checkpoint_8b_hf}"
+ROUND_SAVE_DIR="${ROUND_SAVE_DIR:-$MODEL_ROOT/save_dir_r${ROUND}}"
+ROUND_POLICY_HF="${ROUND_POLICY_HF:-$MODEL_ROOT/policy_r${ROUND}_hf}"
+ROUND_OUTPUT="${ROUND_OUTPUT:-$EVAL_DIR/outputs_policy_r${ROUND}.jsonl}"
+ORIGIN_HF_DIR="${ORIGIN_HF_DIR:-$MODEL_ROOT/qwen3-8B-base}"
 SGLANG_PORT="${SGLANG_PORT:-30010}"
 SGLANG_CUDA_VISIBLE_DEVICES="${SGLANG_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 SGLANG_TP="${SGLANG_TP:-4}"
+SGLANG_EXTRA_ARGS="${SGLANG_EXTRA_ARGS:-}"
 EVAL_TEMPERATURE="${EVAL_TEMPERATURE:-0.0}"
 MIN_FREE_DISK_GB="${MIN_FREE_DISK_GB:-}"
 MIN_FREE_DISK_GB_EXPORT="${MIN_FREE_DISK_GB_EXPORT:-${MIN_FREE_DISK_GB:-30}}"
@@ -41,11 +45,11 @@ MIN_FREE_DISK_GB_EVAL="${MIN_FREE_DISK_GB_EVAL:-${MIN_FREE_DISK_GB:-10}}"
 KEEP_POLICY_HF="${KEEP_POLICY_HF:-0}"
 FORCE_EXPORT="${FORCE_EXPORT:-0}"
 
-mkdir -p "$SLIME/eval"
+mkdir -p "$EVAL_DIR"
 
 check_disk_space() {
   local stage=$1
-  local path=${2:-$SLIME/models}
+  local path=${2:-$MODEL_ROOT}
   local min_free_gb=${3:-$MIN_FREE_DISK_GB}
   mkdir -p "$path"
   local avail_gb
@@ -99,28 +103,41 @@ fi
 generate_with_sglang() {
   local model_path=$1
   local output_path=$2
+  local healthy=0
+  local -a sglang_extra_args=()
+  if [ -n "$SGLANG_EXTRA_ARGS" ]; then
+    read -r -a sglang_extra_args <<< "$SGLANG_EXTRA_ARGS"
+  fi
 
-  echo "Starting SGLang server on port $SGLANG_PORT for $model_path"
+  echo "Starting SGLang server on port $SGLANG_PORT for $model_path extra_args=${SGLANG_EXTRA_ARGS:-<none>}"
   CUDA_VISIBLE_DEVICES="$SGLANG_CUDA_VISIBLE_DEVICES" python3 -m sglang.launch_server \
     --model-path "$model_path" \
     --port "$SGLANG_PORT" \
     --tp "$SGLANG_TP" \
     --host 127.0.0.1 \
-    --trust-remote-code &
-  local sglang_pid=$!
+    --trust-remote-code \
+    "${sglang_extra_args[@]}" &
+  SGLANG_PID=$!
 
   cleanup() {
-    kill "$sglang_pid" 2>/dev/null || true
-    wait "$sglang_pid" 2>/dev/null || true
+    if [ -n "${SGLANG_PID:-}" ]; then
+      kill "$SGLANG_PID" 2>/dev/null || true
+      wait "$SGLANG_PID" 2>/dev/null || true
+    fi
   }
   trap cleanup EXIT
 
   for _ in $(seq 1 60); do
     if curl -sf "http://127.0.0.1:${SGLANG_PORT}/health" > /dev/null 2>&1; then
+      healthy=1
       break
     fi
     sleep 2
   done
+  if [ "$healthy" -ne 1 ]; then
+    echo "ERROR: SGLang server did not become healthy on port $SGLANG_PORT" >&2
+    return 1
+  fi
 
   python3 scripts/eval_generate_sglang.py \
     --model-path "$model_path" \
@@ -139,9 +156,14 @@ generate_with_sglang() {
 
 if [ "$FORCE_EXPORT" -eq 1 ] || [ "$hf_ready" -ne 1 ]; then
   echo "=== Round $ROUND: converting Megatron checkpoint to HF ==="
-  check_disk_space "round${ROUND}-convert-hf" "$SLIME/models" "$MIN_FREE_DISK_GB_EXPORT"
+  check_disk_space "round${ROUND}-convert-hf" "$MODEL_ROOT" "$MIN_FREE_DISK_GB_EXPORT"
   rm -rf "$ROUND_POLICY_HF"
+  CONVERT_MODEL_NAME_ARGS=()
+  if [ -n "$MODEL_NAME_FOR_EXPORT" ]; then
+    CONVERT_MODEL_NAME_ARGS=(--model-name "$MODEL_NAME_FOR_EXPORT")
+  fi
   python3 tools/convert_torch_dist_to_hf.py \
+    "${CONVERT_MODEL_NAME_ARGS[@]}" \
     --input-dir "$CKPT_DIR" \
     --output-dir "$ROUND_POLICY_HF" \
     --origin-hf-dir "$ORIGIN_HF_DIR" \
@@ -152,7 +174,7 @@ fi
 
 if [ "$FORCE_EXPORT" -eq 1 ] || [ "$output_ready" -ne 1 ]; then
   echo "=== Round $ROUND: generating eval outputs ==="
-  check_disk_space "round${ROUND}-eval-generate" "$SLIME/eval" "$MIN_FREE_DISK_GB_EVAL"
+  check_disk_space "round${ROUND}-eval-generate" "$EVAL_DIR" "$MIN_FREE_DISK_GB_EVAL"
   generate_with_sglang "$ROUND_POLICY_HF" "$ROUND_OUTPUT"
 else
   echo "=== Round $ROUND: eval output already complete at $ROUND_OUTPUT ==="

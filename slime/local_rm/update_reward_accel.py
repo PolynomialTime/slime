@@ -194,12 +194,188 @@ def _split_rollout_samples_by_prompt(samples, holdout_ratio: float):
     return train_samples, eval_samples, stats
 
 
+# ---------- In-rollout preference pair construction ----------
+# When rollouts carry ground-truth labels (math mode) we can score each
+# rollout with the same verl-style grader used by the rubric reward, then
+# pair a correct rollout against a wrong rollout from the same prompt.
+# This sidesteps the failure mode where the RM learns format (demo clean /
+# rollout messy) instead of correctness, because within a prompt both
+# rollouts have the same format distribution. IRL loss math is unchanged;
+# only the source of (chosen, rejected) changes.
+
+_IN_ROLLOUT_GRADER = None  # lazy-loaded math_utils module, False if load failed
+
+
+def _load_grader_standalone():
+    """Load slime/rollout/rm_hub/math_utils.py without triggering the rm_hub
+    __init__ which pulls ray/aiohttp. Safe to call from any accelerator rank.
+    Returns the loaded module, or False if load failed (cached)."""
+    global _IN_ROLLOUT_GRADER
+    if _IN_ROLLOUT_GRADER is not None:
+        return _IN_ROLLOUT_GRADER
+    import importlib.util
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    module_path = os.path.join(repo_root, "slime", "rollout", "rm_hub", "math_utils.py")
+    spec = importlib.util.spec_from_file_location("_math_grader_for_reward_pair", module_path)
+    if spec is None or spec.loader is None:
+        _IN_ROLLOUT_GRADER = False
+        _log.warning(
+            "[pair_build] grader_load_failed: cannot locate math_utils.py at %s; "
+            "falling back to demo-vs-rollout pairs",
+            module_path,
+        )
+        return False
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        _IN_ROLLOUT_GRADER = False
+        _log.warning(
+            "[pair_build] grader_load_failed: exec_module raised %s (%s); "
+            "falling back to demo-vs-rollout pairs",
+            type(e).__name__, e,
+        )
+        return False
+    _IN_ROLLOUT_GRADER = module
+    return module
+
+
+def _compute_answer_score(response: str | None, label: str | None) -> float | None:
+    """Return 1.0 if grader judges response correct against label, 0.0 if
+    wrong, None if inputs are missing or grader unavailable. Never raises."""
+    if not response or label is None:
+        return None
+    label_str = str(label).strip()
+    if not label_str:
+        return None
+    grader = _load_grader_standalone()
+    if not grader:
+        return None
+    try:
+        return 1.0 if bool(grader.grade_answer_verl(response, label_str)) else 0.0
+    except Exception:
+        return None
+
+
+def _score_rollout_samples(rollout_samples) -> dict:
+    """In-place populate `answer_score` on each rollout sample that has
+    both response text and label. Returns stats dict."""
+    scored = 0
+    correct = 0
+    skipped_no_text = 0
+    grader_unavailable = 0
+    for sample in rollout_samples:
+        if sample.response is None or sample.label is None:
+            skipped_no_text += 1
+            sample.answer_score = None
+            continue
+        score = _compute_answer_score(sample.response, sample.label)
+        sample.answer_score = score
+        if score is None:
+            grader_unavailable += 1
+        else:
+            scored += 1
+            if score == 1.0:
+                correct += 1
+    return {
+        "total": len(rollout_samples),
+        "scored": scored,
+        "correct": correct,
+        "wrong": scored - correct,
+        "skipped_no_text": skipped_no_text,
+        "grader_unavailable": grader_unavailable,
+    }
+
+
+def _build_in_rollout_pairs(
+    rollout_samples,
+    demo_sample_index,
+    *,
+    rng_seed: int = 42,
+):
+    """Group rollouts by source_row_id (or prompt as fallback), then for
+    each group build ONE preference pair:
+      - both correct AND wrong present  → (correct rollout, wrong rollout)  [in-rollout]
+      - all wrong                       → (matched demo,   wrong rollout)  [demo-anchor]
+      - all correct                     → SKIP (no learning signal)
+      - answer_score unavailable        → SKIP (caller falls back to legacy flow)
+    All ranks receive the same pair list when they call with the same
+    rng_seed and the same input list, enabling deterministic sharding."""
+    rng = random.Random(rng_seed)
+    groups = defaultdict(list)
+    for sample in rollout_samples:
+        key = sample.source_row_id if sample.source_row_id is not None else sample.prompt
+        if key is None:
+            continue
+        groups[key].append(sample)
+
+    pairs: list[tuple] = []
+    stats = {
+        "groups_total": len(groups),
+        "pair_in_rollout": 0,
+        "pair_demo_fallback": 0,
+        "skip_all_correct": 0,
+        "skip_all_unscored": 0,
+        "skip_no_demo_for_fallback": 0,
+    }
+    # Sort groups for deterministic order across ranks.
+    for key in sorted(groups.keys(), key=lambda k: (isinstance(k, str), k)):
+        members = groups[key]
+        correct_pool = [s for s in members if s.answer_score == 1.0]
+        wrong_pool = [s for s in members if s.answer_score == 0.0]
+        if not correct_pool and not wrong_pool:
+            stats["skip_all_unscored"] += 1
+            continue
+        if correct_pool and wrong_pool:
+            chosen = rng.choice(correct_pool)
+            rejected = rng.choice(wrong_pool)
+            pairs.append((chosen, rejected))
+            stats["pair_in_rollout"] += 1
+            continue
+        if wrong_pool and not correct_pool:
+            demo = match_token_sample(
+                wrong_pool[0],
+                demo_sample_index,
+                strict_row_id=True,
+                random_prompt_fallback=True,
+            )
+            if demo is None:
+                stats["skip_no_demo_for_fallback"] += 1
+                continue
+            rejected = rng.choice(wrong_pool)
+            pairs.append((demo, rejected))
+            stats["pair_demo_fallback"] += 1
+            continue
+        # All correct — no useful signal for IRL margin.
+        stats["skip_all_correct"] += 1
+    return pairs, stats
+
+
 def _build_holdout_eval_data(eval_rollout_samples, demo_sample_index, max_samples=None):
     chosen_tokens = []
     target_tokens = []
     missing = 0
+    skipped_dup = 0
     alignment_stats = init_alignment_stats()
+    # Deduplicate eval by prompt identity so the eval set size does not grow
+    # with N_SAMPLES_PER_PROMPT. rank 0 runs inline eval alone; an eval set
+    # larger than a few thousand pairs starves peer ranks at Gloo's 600s
+    # monitoredBarrier. See 2026-05-08 incident (round-2 reward crash).
+    #
+    # Semantic note: at N_SAMPLES_PER_PROMPT=1 this dedup is a no-op. At N=4
+    # it shrinks the eval set ~4x to match the historical N=1 baseline,
+    # keeping eval_acc numerically comparable to prior rounds. The dedup
+    # skip count is exported in stats["skipped_duplicates"] for observability.
+    seen_keys = set()
     for sample in eval_rollout_samples:
+        dedup_key = sample.source_row_id if sample.source_row_id is not None else sample.prompt
+        if dedup_key is None:
+            skipped_dup += 0  # no dedup key; fall through to missing counter below
+        elif dedup_key in seen_keys:
+            skipped_dup += 1
+            continue
         matched_demo = match_token_sample(
             sample,
             demo_sample_index,
@@ -210,6 +386,8 @@ def _build_holdout_eval_data(eval_rollout_samples, demo_sample_index, max_sample
         if matched_demo is None:
             missing += 1
             continue
+        if dedup_key is not None:
+            seen_keys.add(dedup_key)
         chosen_tokens.append(matched_demo.tokens)
         target_tokens.append(sample.tokens)
         if max_samples is not None and len(chosen_tokens) >= max_samples:
@@ -220,6 +398,8 @@ def _build_holdout_eval_data(eval_rollout_samples, demo_sample_index, max_sample
         "targets": len(eval_rollout_samples),
         "matched": len(chosen_tokens),
         "missing": missing,
+        "skipped_duplicates": skipped_dup,
+        "unique_prompts_used": len(seen_keys),
         "source": "holdout",
     }
     stats.update(alignment_stats)
@@ -324,7 +504,8 @@ def _run_inline_eval(model, chosen_tokens, target_tokens, pad_id, device, batch_
 def _reload_eval_tolerances(eval_size: int) -> tuple[float, float]:
     # One flipped pair changes accuracy by 1 / eval_size; anything above that is a real mismatch.
     acc_tol = 1.1 / max(eval_size, 1)
-    margin_tol = 1e-3
+    margin_tol_raw = os.environ.get("SLIME_REWARD_RELOAD_MARGIN_TOL")
+    margin_tol = float(margin_tol_raw) if margin_tol_raw else 1e-3
     return acc_tol, margin_tol
 
 
@@ -411,7 +592,7 @@ def main():
             summary = summarize_rollout_samples(path, stop_token_ids=getattr(args, "rollout_stop_token_ids", None))
             for key, value in summary.items():
                 rollout_summary[key] += value
-            all_rollout_samples.extend(load_rollout_samples(path))
+            all_rollout_samples.extend(load_rollout_samples(path, tokenizer=tokenizer))
 
     if not all_rollout_samples:
         raise RuntimeError("No rollout samples were loaded for reward update.")
@@ -454,12 +635,71 @@ def main():
     if not train_rollout_samples_all:
         raise RuntimeError("No training rollout samples remain after prompt-hash holdout split.")
 
-    rollout_samples = _shard_samples(train_rollout_samples_all, accelerator.process_index, accelerator.num_processes)
-    if not rollout_samples:
+    # Decide training pair construction mode. The legacy mode pairs each
+    # rollout with its matched demo; the new in-rollout mode pairs correct
+    # rollouts against wrong rollouts within the same prompt using verl
+    # grader judgements. The new mode requires N_SAMPLES_PER_PROMPT >= 2
+    # and ground-truth labels on rollouts; otherwise we fall back silently.
+    pair_mode_requested = os.environ.get("SLIME_REWARD_PAIR_MODE", "demo_vs_rollout").strip().lower()
+    if pair_mode_requested not in {"demo_vs_rollout", "in_rollout"}:
         raise RuntimeError(
-            "Reward update left rank %d without training rollout samples after sharding."
-            % accelerator.process_index
+            f"Unsupported SLIME_REWARD_PAIR_MODE={pair_mode_requested!r}. "
+            "Expected 'demo_vs_rollout' or 'in_rollout'."
         )
+    use_in_rollout_pairs = False
+    in_rollout_pairs_all: list[tuple] = []
+    score_stats: dict = {}
+    pair_stats: dict = {}
+    if pair_mode_requested == "in_rollout":
+        score_stats = _score_rollout_samples(train_rollout_samples_all)
+        if score_stats["scored"] > 0:
+            in_rollout_pairs_all, pair_stats = _build_in_rollout_pairs(
+                train_rollout_samples_all,
+                demo_sample_index,
+                rng_seed=42,
+            )
+            # Reject activation when not every rank would receive at least one
+            # pair after strided sharding. Otherwise ranks with zero local
+            # pairs would raise RuntimeError below while live ranks march into
+            # dist.all_reduce and hang on a dead peer (distributed deadlock).
+            min_pairs_required = max(1, accelerator.num_processes) * max(1, args.reward_update_batch_size)
+            if len(in_rollout_pairs_all) >= min_pairs_required:
+                use_in_rollout_pairs = True
+            elif in_rollout_pairs_all and accelerator.is_main_process:
+                accelerator.print(
+                    "[pair_build] WARNING: only %d in-rollout pairs available "
+                    "(need %d = num_processes=%d × batch_size=%d); falling back to "
+                    "legacy demo-vs-rollout pairing to avoid distributed deadlock."
+                    % (
+                        len(in_rollout_pairs_all),
+                        min_pairs_required,
+                        accelerator.num_processes,
+                        args.reward_update_batch_size,
+                    )
+                )
+
+    if use_in_rollout_pairs:
+        local_pairs = _shard_samples(
+            in_rollout_pairs_all, accelerator.process_index, accelerator.num_processes
+        )
+        if not local_pairs:
+            # Should be unreachable given min_pairs_required guard above, but
+            # keep as defense-in-depth so we fail loudly instead of deadlocking.
+            raise RuntimeError(
+                "Reward update left rank %d without training pairs after sharding (total=%d, processes=%d)."
+                % (accelerator.process_index, len(in_rollout_pairs_all), accelerator.num_processes)
+            )
+        rollout_samples = []  # unused in in-rollout mode; keep var for log compat
+    else:
+        rollout_samples = _shard_samples(
+            train_rollout_samples_all, accelerator.process_index, accelerator.num_processes
+        )
+        if not rollout_samples:
+            raise RuntimeError(
+                "Reward update left rank %d without training rollout samples after sharding."
+                % accelerator.process_index
+            )
+        local_pairs = []
 
     external_eval_chosen, external_eval_targets, external_eval_stats = _load_external_eval_data(args, tokenizer)
     if external_eval_chosen:
@@ -563,13 +803,54 @@ def main():
             )
         )
         accelerator.print(
-            "After sharding (process %d/%d): %d training rollout samples"
+            "After sharding (process %d/%d): %d training rollout samples, %d training pairs (pair_mode=%s)"
             % (
                 accelerator.process_index,
                 accelerator.num_processes,
                 len(rollout_samples),
+                len(local_pairs),
+                "in_rollout" if use_in_rollout_pairs else "demo_vs_rollout",
             )
         )
+        if use_in_rollout_pairs:
+            accelerator.print(
+                "[pair_build] mode=in_rollout score_total=%d scored=%d correct=%d wrong=%d "
+                "skipped_no_text=%d grader_unavailable=%d groups=%d "
+                "pair_in_rollout=%d pair_demo_fallback=%d skip_all_correct=%d "
+                "skip_all_unscored=%d skip_no_demo=%d pairs_total=%d"
+                % (
+                    score_stats.get("total", 0),
+                    score_stats.get("scored", 0),
+                    score_stats.get("correct", 0),
+                    score_stats.get("wrong", 0),
+                    score_stats.get("skipped_no_text", 0),
+                    score_stats.get("grader_unavailable", 0),
+                    pair_stats.get("groups_total", 0),
+                    pair_stats.get("pair_in_rollout", 0),
+                    pair_stats.get("pair_demo_fallback", 0),
+                    pair_stats.get("skip_all_correct", 0),
+                    pair_stats.get("skip_all_unscored", 0),
+                    pair_stats.get("skip_no_demo_for_fallback", 0),
+                    len(in_rollout_pairs_all),
+                )
+            )
+            if tb_writer is not None:
+                tb_writer.add_scalar("reward/rollout_correct_frac",
+                    score_stats.get("correct", 0) / max(score_stats.get("scored", 1), 1),
+                    cli.rollout_id,
+                )
+                tb_writer.add_scalar("reward/pairs_in_rollout_total",
+                    len(in_rollout_pairs_all), cli.rollout_id,
+                )
+                tb_writer.add_scalar("reward/pairs_demo_fallback_frac",
+                    pair_stats.get("pair_demo_fallback", 0) / max(len(in_rollout_pairs_all), 1),
+                    cli.rollout_id,
+                )
+        else:
+            accelerator.print(
+                "[pair_build] mode=demo_vs_rollout (legacy) score_stats=%s pair_mode_requested=%s"
+                % (score_stats or "not_computed", pair_mode_requested)
+            )
 
     def _cfg(m):
         return accelerator.unwrap_model(m).config
@@ -587,7 +868,10 @@ def main():
     if online_pref_weight <= 0.0:
         raise RuntimeError("Reward update requires at least one positive preference weight.")
 
-    num_training_batches_local = len(rollout_samples) // args.reward_update_batch_size
+    if use_in_rollout_pairs:
+        num_training_batches_local = len(local_pairs) // args.reward_update_batch_size
+    else:
+        num_training_batches_local = len(rollout_samples) // args.reward_update_batch_size
     local_batch_tensor = torch.tensor(num_training_batches_local, device=accelerator.device)
     if accelerator.num_processes > 1 and dist.is_available() and dist.is_initialized():
         dist.all_reduce(local_batch_tensor, op=dist.ReduceOp.MIN)
@@ -605,7 +889,11 @@ def main():
         accelerator.print(f"Local rollout batches: {num_training_batches_local}")
         accelerator.print(f"Training iterations per epoch: {global_min_batches}")
 
-    eval_interval = max(1, global_min_batches // 10)
+    eval_interval_arg = getattr(args, "reward_eval_interval", None)
+    if eval_interval_arg is None:
+        eval_interval = max(1, global_min_batches // 10)
+    else:
+        eval_interval = int(eval_interval_arg)
     eval_batch_size = getattr(args, "reward_eval_batch_size", 8) or 8
     eval_results = []
     best_acc = -1.0
@@ -620,9 +908,13 @@ def main():
         leave=False,
         disable=not accelerator.is_main_process,
     ):
-        random.shuffle(rollout_samples)
-        batch_iter = iter_batches(rollout_samples, args.reward_update_batch_size, drop_last=True)
-        for batch_idx, roll_batch in enumerate(
+        if use_in_rollout_pairs:
+            random.shuffle(local_pairs)
+            batch_iter = iter_batches(local_pairs, args.reward_update_batch_size, drop_last=True)
+        else:
+            random.shuffle(rollout_samples)
+            batch_iter = iter_batches(rollout_samples, args.reward_update_batch_size, drop_last=True)
+        for batch_idx, batch_items in enumerate(
             tqdm(
                 batch_iter,
                 desc="reward_update_batch",
@@ -633,39 +925,46 @@ def main():
             if batch_idx >= global_min_batches:
                 break
 
-            demo_batch = []
-            for rollout_sample in roll_batch:
-                matched_demo = match_token_sample(
-                    rollout_sample,
-                    demo_sample_index,
-                    strict_row_id=True,
-                    random_prompt_fallback=True,
-                )
-                if matched_demo is None:
-                    raise RuntimeError(
-                        "Reward training batch lost its demo match after upfront filtering; "
-                        f"source_row_id={rollout_sample.source_row_id} prompt_prefix={repr((rollout_sample.prompt or '')[:200])}"
+            if use_in_rollout_pairs:
+                # batch_items is list[(chosen_sample, rejected_sample)]
+                chosen_batch = [pair[0] for pair in batch_items]
+                rejected_batch = [pair[1] for pair in batch_items]
+            else:
+                # legacy: batch_items is list[rollout_sample]; look up matching demo
+                rejected_batch = batch_items
+                chosen_batch = []
+                for rollout_sample in rejected_batch:
+                    matched_demo = match_token_sample(
+                        rollout_sample,
+                        demo_sample_index,
+                        strict_row_id=True,
+                        random_prompt_fallback=True,
                     )
-                demo_batch.append(matched_demo)
-            demo_tokens = [sample.tokens for sample in demo_batch]
-            roll_tokens = [sample.tokens for sample in roll_batch]
+                    if matched_demo is None:
+                        raise RuntimeError(
+                            "Reward training batch lost its demo match after upfront filtering; "
+                            f"source_row_id={rollout_sample.source_row_id} prompt_prefix={repr((rollout_sample.prompt or '')[:200])}"
+                        )
+                    chosen_batch.append(matched_demo)
+            chosen_tokens = [sample.tokens for sample in chosen_batch]
+            rejected_tokens = [sample.tokens for sample in rejected_batch]
 
-            rewards_demo = get_sequence_rewards(model, demo_tokens, pad_id, accelerator.device)
-            rewards_roll = get_sequence_rewards(model, roll_tokens, pad_id, accelerator.device)
+            rewards_chosen = get_sequence_rewards(model, chosen_tokens, pad_id, accelerator.device)
+            rewards_rejected = get_sequence_rewards(model, rejected_tokens, pad_id, accelerator.device)
 
             with torch.no_grad():
-                rewards_demo_old = get_sequence_rewards(old_model, demo_tokens, pad_id, accelerator.device)
-                rewards_roll_old = get_sequence_rewards(old_model, roll_tokens, pad_id, accelerator.device)
-                if not torch.isfinite(rewards_demo_old).all().item() or not torch.isfinite(rewards_roll_old).all().item():
+                rewards_chosen_old = get_sequence_rewards(old_model, chosen_tokens, pad_id, accelerator.device)
+                rewards_rejected_old = get_sequence_rewards(old_model, rejected_tokens, pad_id, accelerator.device)
+                if not torch.isfinite(rewards_chosen_old).all().item() or not torch.isfinite(rewards_rejected_old).all().item():
                     raise RuntimeError("Old reward model produced non-finite rewards; checkpoint is corrupted.")
 
-            if not torch.isfinite(rewards_demo).all().item() or not torch.isfinite(rewards_roll).all().item():
+            if not torch.isfinite(rewards_chosen).all().item() or not torch.isfinite(rewards_rejected).all().item():
                 raise RuntimeError("Reward model produced non-finite rewards before optimization.")
 
-            online_margin = rewards_demo.float().mean() - rewards_roll.float().mean()
+            online_margin = rewards_chosen.float().mean() - rewards_rejected.float().mean()
 
             preference_objective = online_pref_weight * online_margin
-            delta_terms = [rewards_demo - rewards_demo_old, rewards_roll - rewards_roll_old]
+            delta_terms = [rewards_chosen - rewards_chosen_old, rewards_rejected - rewards_rejected_old]
 
             delta = torch.cat(delta_terms, dim=0).float()
             epsilon = torch.sqrt(torch.mean(delta ** 2) + epsilon_stability_eps)
@@ -679,7 +978,7 @@ def main():
             optimizer.step()
 
             with torch.no_grad():
-                rewards_norm = torch.cat([rewards_demo.detach(), rewards_roll.detach()], dim=0)
+                rewards_norm = torch.cat([rewards_chosen.detach(), rewards_rejected.detach()], dim=0)
                 cfg = _cfg(model)
                 bias, normalization_constant = get_reward_normalization_stats(cfg)
                 raw = rewards_norm.float() * normalization_constant + bias
@@ -708,10 +1007,12 @@ def main():
                         c_coef *= coef_scale_down
                 c_coef = max(c_coef_min, min(c_coef, c_coef_max))
                 _cfg(model).c_coef = float(c_coef)
-                online_acc = accelerator.gather((rewards_demo > rewards_roll).float()).mean().item()
-                online_margin_global = accelerator.gather((rewards_demo - rewards_roll).detach().float()).mean().item()
-                r_demo_global = accelerator.gather(rewards_demo.detach().float()).mean().item()
-                r_roll_global = accelerator.gather(rewards_roll.detach().float()).mean().item()
+                online_acc = accelerator.gather((rewards_chosen > rewards_rejected).float()).mean().item()
+                online_margin_global = accelerator.gather((rewards_chosen - rewards_rejected).detach().float()).mean().item()
+                # TB key names kept as r_demo / r_roll for historical dashboard continuity;
+                # in in-rollout mode these mean r_chosen / r_rejected.
+                r_demo_global = accelerator.gather(rewards_chosen.detach().float()).mean().item()
+                r_roll_global = accelerator.gather(rewards_rejected.detach().float()).mean().item()
 
             global_batch_idx += 1
 
@@ -727,7 +1028,7 @@ def main():
                 tb_writer.add_scalar("reward/epsilon", epsilon_global, global_batch_idx)
                 tb_writer.add_scalar("reward/c_coef", c_coef, global_batch_idx)
 
-            if eval_chosen and global_batch_idx % eval_interval == 0:
+            if eval_chosen and eval_interval > 0 and global_batch_idx % eval_interval == 0:
                 accelerator.wait_for_everyone()
                 if accelerator.is_main_process:
                     unwrapped = accelerator.unwrap_model(model)

@@ -20,6 +20,12 @@ class TokenSample:
     prompt: str | None = None
     raw_prompt: str | None = None
     source_row_id: int | None = None
+    # Optional fields populated by load_rollout_samples so downstream pair
+    # builders (e.g. in-rollout correctness pairing) can grade responses
+    # against ground-truth labels. Demo loaders leave these as None.
+    response: str | None = None
+    label: str | None = None
+    answer_score: float | None = None
 
 
 @dataclass
@@ -205,7 +211,46 @@ def load_prompt_answer_samples(
     return samples
 
 
-def load_rollout_samples(rollout_path: str) -> list[TokenSample]:
+def _tokenizer_size(tokenizer) -> int:
+    try:
+        return len(tokenizer)
+    except Exception:
+        vocab_size = getattr(tokenizer, "vocab_size", None)
+        return int(vocab_size) if vocab_size is not None else 0
+
+
+def _needs_retokenize_for_reward(tokens: list[int], tokenizer) -> bool:
+    vocab_size = _tokenizer_size(tokenizer)
+    if vocab_size <= 0:
+        return False
+    return any((token_id < 0 or token_id >= vocab_size) for token_id in tokens)
+
+
+def _chat_terminator_id(tokenizer) -> int | None:
+    terminator_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    if terminator_id is not None and tokenizer.convert_ids_to_tokens(terminator_id) == "<|im_end|>":
+        return int(terminator_id)
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    return int(eos_id) if eos_id is not None else None
+
+
+def _retokenize_rollout_sample_for_reward(sample: Sample, tokenizer) -> tuple[list[int], int]:
+    prompt = sample.prompt if isinstance(sample.prompt, str) else json.dumps(sample.prompt, ensure_ascii=False)
+    prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    response_ids = tokenizer(sample.response or "", add_special_tokens=False)["input_ids"]
+
+    # Completed SGLang rollouts carry the assistant-turn terminator in tokens,
+    # but not in decoded response text. Preserve that boundary after retokenizing
+    # for reward models that use a different tokenizer from the policy.
+    if sample.status == Sample.Status.COMPLETED:
+        terminator_id = _chat_terminator_id(tokenizer)
+        if terminator_id is not None and (not response_ids or response_ids[-1] != terminator_id):
+            response_ids = response_ids + [terminator_id]
+
+    return prompt_ids + response_ids, len(response_ids)
+
+
+def load_rollout_samples(rollout_path: str, tokenizer=None) -> list[TokenSample]:
     data = torch.load(rollout_path, weights_only=False)
     samples_dict = data.get("samples", [])
     samples: list[TokenSample] = []
@@ -214,12 +259,20 @@ def load_rollout_samples(rollout_path: str) -> list[TokenSample]:
         if not sample.tokens or sample.response_length <= 0:
             continue
         prompt = sample.prompt if isinstance(sample.prompt, str) else json.dumps(sample.prompt, ensure_ascii=False)
+        tokens = sample.tokens
+        response_length = sample.response_length
+        if tokenizer is not None and _needs_retokenize_for_reward(tokens, tokenizer):
+            tokens, response_length = _retokenize_rollout_sample_for_reward(sample, tokenizer)
+        if not tokens or response_length <= 0:
+            continue
         samples.append(
             TokenSample(
-                tokens=sample.tokens,
-                response_length=sample.response_length,
+                tokens=tokens,
+                response_length=response_length,
                 prompt=prompt,
                 source_row_id=get_sample_source_row_id(sample),
+                response=sample.response if sample.response else None,
+                label=sample.label if sample.label else None,
             )
         )
     return samples

@@ -95,14 +95,14 @@ def filter_long_prompt(origin_samples: list[Sample], tokenizer, processor, max_l
         )
         return origin_samples
 
-    if processor:
+    if processor and any(sample.multimodal_inputs is not None for sample in origin_samples):
         filtered_samples = []
         for sample in origin_samples:
-            from slime.utils.processing_utils import process_vision_info
-
-            multimodal_inputs = process_vision_info(sample.prompt, processor)
-            processor_output = processor(text=sample.prompt, **multimodal_inputs)
-            input_ids = processor_output["input_ids"][0]
+            if sample.multimodal_inputs is None:
+                input_ids = tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
+            else:
+                processor_output = processor(text=sample.prompt, **sample.multimodal_inputs)
+                input_ids = processor_output["input_ids"][0]
             if len(input_ids) <= max_length:
                 filtered_samples.append(sample)
     else:
@@ -225,7 +225,7 @@ class Dataset:
             else:
                 output_prompt = prompt
 
-            if processor:
+            if processor and multimodal_keys is not None:
                 from slime.utils.processing_utils import process_vision_info
 
                 assert isinstance(

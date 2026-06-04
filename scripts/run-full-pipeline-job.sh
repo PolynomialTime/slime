@@ -8,10 +8,20 @@ cd $SLIME
 export PYTHONPATH="$SLIME${PYTHONPATH:+:$PYTHONPATH}"
 ULTRAFEEDBACK_DIR=${ULTRAFEEDBACK_DIR:-$SLIME/ultrafeedback}
 DATA_MODE=${DATA_MODE:-ultrafeedback}
-REWARD_DIR=${REWARD_DIR:-$SLIME/models/reward_model}
+MODEL_ROOT=${MODEL_ROOT:-$SLIME/models}
+MODEL_SH=${MODEL_SH:-scripts/models/qwen3-8B.sh}
+MODEL_NAME_FOR_EXPORT=${MODEL_NAME_FOR_EXPORT:-}
+EVAL_DIR=${EVAL_DIR:-$SLIME/eval}
+EVAL_WINRATE_DIR=${EVAL_WINRATE_DIR:-$SLIME/eval_winrate}
+ROLLOUT_DIR=${ROLLOUT_DIR:-$SLIME/rollout}
+TENSORBOARD_ROOT=${TENSORBOARD_ROOT:-$SLIME/tensorboard_log}
+REWARD_DIR=${REWARD_DIR:-$MODEL_ROOT/reward_model}
 REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-}
-BASE_HF_DIR=${BASE_HF_DIR:-$SLIME/models/qwen3-8B-base}
-BASE_TORCH_DIST_DIR=${BASE_TORCH_DIST_DIR:-$SLIME/models/qwen3-8b-base_torch_dist}
+BASE_HF_DIR=${BASE_HF_DIR:-$MODEL_ROOT/qwen3-8B-base}
+BASE_TORCH_DIST_DIR=${BASE_TORCH_DIST_DIR:-$MODEL_ROOT/qwen3-8b-base_torch_dist}
+SFT_HF_DIR=${SFT_HF_DIR:-$MODEL_ROOT/sft_checkpoint_8b_hf}
+SFT_MEGATRON_DIR=${SFT_MEGATRON_DIR:-$MODEL_ROOT/sft_checkpoint}
+SFT_BASELINE=${SFT_BASELINE:-$EVAL_DIR/outputs_sft_baseline.jsonl}
 
 if [ "$DATA_MODE" = "math" ]; then
   # Math defaults applied only when user hasn't overridden them via env.
@@ -20,7 +30,7 @@ if [ "$DATA_MODE" = "math" ]; then
   # can produce a useful reward signal. 10k proved too thin (R1 pass@1 22.5%,
   # AIME24 0/30); 80k subset of NuminaMath gives the base enough coverage.
   : "${SFT_WARMUP_SAMPLES:=80000}"
-  # Keep warmup artifacts inside $SLIME/math/ — default template would write
+  # Keep warmup artifacts inside $SLIME/math/ -- default template would write
   # them under $ULTRAFEEDBACK_DIR which is semantically wrong in math mode.
   : "${SFT_WARMUP_DATA_PATH:=$SLIME/math/train_demo-warmup${SFT_WARMUP_SAMPLES}.jsonl}"
   : "${SFT_WARMUP_REPORT_PATH:=$SLIME/math/train_demo-warmup${SFT_WARMUP_SAMPLES}.report.json}"
@@ -29,38 +39,33 @@ if [ "$DATA_MODE" = "math" ]; then
   : "${REWARD_TRAIN_DATA_PATH:=$SLIME/math/train_demo.jsonl}"
   : "${REWARD_EXTERNAL_EVAL_PATH:=}"
   # Rolling retention for reward snapshots: after round N completes, prune
-  # step_round{1..N-1} and keep only step_round{N} + latest/. Each snapshot
-  # is ~15GB; keeping all eight would cost 120GB+. The prune_stale_checkpoints
-  # function (around L915) already implements this; we just flip the gate.
+  # step_round{1..N-1} and keep only step_round{N} + latest/.
   : "${KEEP_FINAL_REWARD_PER_ROUND:=0}"
-  # Use ${VAR=val} (no colon): only assigns if VAR is unset, preserves
-  # explicit empty string. We need empty (not "rejected") in math mode so
-  # update_reward_accel._load_external_eval_data short-circuits at L233.
+  # Preserve explicit empty string in math mode so external eval short-circuits.
   : "${REWARD_EVAL_REJECTED_KEY_PASS=}"
   : "${TEST_DATA:=$SLIME/math/eval_prompts.jsonl}"
   : "${ROLLOUT_MAX_RESPONSE_LEN:=2048}"
   : "${PROMPT_DATA:=$SLIME/math/train_prompts.jsonl}"
   : "${DEMO_DATA:=$SLIME/math/train_prompts.jsonl}"
-  # Rubric multi-source reward (default ON in math mode):
-  #   final = w_irl * r_irl + w_format * format_score + w_answer * answer_score
-  # Combats the format-drift reward hacking we observed at R1..R8.
+  # Rubric multi-source reward in math mode:
+  # final = w_irl * r_irl + w_format * format_score + w_answer * answer_score.
   : "${SLIME_RUBRIC_ENABLED:=1}"
   : "${SLIME_RUBRIC_W_IRL:=1.0}"
   : "${SLIME_RUBRIC_W_FORMAT:=0.5}"
   : "${SLIME_RUBRIC_W_ANSWER:=1.0}"
-  # PROMPT_LABEL_KEY=label so rollout samples carry ground truth → custom_rm
-  # can evaluate answer_score(response, label).
+  # PROMPT_LABEL_KEY=label so rollout samples carry ground truth for answer_score.
   : "${PROMPT_LABEL_KEY_PASS=label}"
 fi
 : "${REWARD_EVAL_REJECTED_KEY_PASS=rejected}"
 : "${SLIME_RUBRIC_ENABLED:=0}"
+: "${SLIME_RUBRIC_PLUGINS:=}"
 : "${SLIME_RUBRIC_W_IRL:=1.0}"
 : "${SLIME_RUBRIC_W_FORMAT:=0.5}"
 : "${SLIME_RUBRIC_W_ANSWER:=1.0}"
 : "${PROMPT_LABEL_KEY_PASS=}"
 : "${N_SAMPLES_PER_PROMPT:=1}"
+: "${ADVANTAGE_ESTIMATOR:=ppo}"
 : "${NORMALIZE_ADVANTAGES:=1}"
-
 SFT_SYNTH_FULL_DATA_PATH=${SFT_SYNTH_FULL_DATA_PATH:-${SFT_SYNTH_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-sft.jsonl}}
 SFT_SYNTH_REPORT_PATH=${SFT_SYNTH_REPORT_PATH:-$ULTRAFEEDBACK_DIR/uf-sft.report.json}
 SFT_WARMUP_SAMPLES=${SFT_WARMUP_SAMPLES:-10000}
@@ -115,8 +120,8 @@ WINRATE_GATE_FALLBACK_MODEL=${WINRATE_GATE_FALLBACK_MODEL:-claude-sonnet-4-6}
 WINRATE_GATE_FALLBACK_API_KEY=${WINRATE_GATE_FALLBACK_API_KEY:-${WINRATE_FALLBACK_API_KEY:-}}
 WINRATE_GATE_FALLBACK_BASE_URL=${WINRATE_GATE_FALLBACK_BASE_URL:-${WINRATE_FALLBACK_BASE_URL:-$WINRATE_GATE_BASE_URL}}
 CODEX_RULES_PATH=${CODEX_RULES_PATH:-/mnt/shared-storage-gpfs2/wangqianyi2/slime-autoresearch-notify/CODEX_HARD_RULES.md}
-BT_PRETRAIN_DIR=${BT_PRETRAIN_DIR:-$SLIME/models/reward_model_bt_pretrain/latest}
-BT_PRETRAIN_BASE_MODEL=${BT_PRETRAIN_BASE_MODEL:-$SLIME/models/qwen3-8B-base}
+BT_PRETRAIN_DIR=${BT_PRETRAIN_DIR:-$MODEL_ROOT/reward_model_bt_pretrain/latest}
+BT_PRETRAIN_BASE_MODEL=${BT_PRETRAIN_BASE_MODEL:-$MODEL_ROOT/qwen3-8B-base}
 BT_PRETRAIN_ENABLED=${BT_PRETRAIN_ENABLED:-1}
 SFT_ENABLED=${SFT_ENABLED:-1}
 REWARD_BT_FULL_DATA_PATH=${REWARD_BT_FULL_DATA_PATH:-$ULTRAFEEDBACK_DIR/uf-train-prefs.jsonl}
@@ -156,9 +161,6 @@ if [ -f "$REWARD_EXTERNAL_EVAL_PATH" ]; then
   fi
 fi
 
-SFT_HF_DIR=$SLIME/models/sft_checkpoint_8b_hf
-SFT_MEGATRON_DIR=$SLIME/models/sft_checkpoint
-SFT_BASELINE=$SLIME/eval/outputs_sft_baseline.jsonl
 SFT_DATA_PATH=${SFT_DATA_PATH:-}
 if [ -z "$SFT_DATA_PATH" ]; then
   if [ "$SFT_WARMUP_SAMPLES" -gt 0 ]; then
@@ -170,13 +172,18 @@ if [ -z "$SFT_DATA_PATH" ]; then
   fi
 fi
 
-# ============ Global path-safety assertions (FIRST — before any side effect) ============
-# Block any user env that aliases a rm-target variable to a protected base path.
-# Learned from 2026-04-30 incident where SFT_HF_DIR was aliased to BASE_HF_DIR
-# and reset_pipeline_state's rm -rf destroyed the base model.
+# ============ Global path-safety assertions (before any destructive cleanup) ============
+# Block user env overrides that alias an rm target to a protected model/base path.
 _BASE_PATHS_PROTECTED=(
   "$BASE_HF_DIR"
   "$BASE_TORCH_DIST_DIR"
+  "$BT_PRETRAIN_BASE_MODEL"
+  "$REWARD_MODEL_INIT"
+  "$MODEL_ROOT/qwen3-8B-base"
+  "$MODEL_ROOT/qwen3-8b-base_torch_dist"
+  "$MODEL_ROOT/qwen3.5-9B-base"
+  "$MODEL_ROOT/qwen3.5-9b-base_torch_dist"
+  "$MODEL_ROOT/qwen3-1.7B-base"
   "$SLIME/models/qwen3-8B-base"
   "$SLIME/models/qwen3-8b-base_torch_dist"
   "$SLIME/models/qwen3-1.7B-base"
@@ -198,17 +205,17 @@ _assert_not_protected() {
       exit 2
     fi
   done
-  if [ "$rf_value" = "/" ] || [ "$rf_value" = "$SLIME" ] || [ "$rf_value" = "$SLIME/models" ]; then
+  if [ "$rf_value" = "/" ] || [ "$rf_value" = "$SLIME" ] || [ "$rf_value" = "$SLIME/models" ] || [ "$rf_value" = "$MODEL_ROOT" ]; then
     echo "FATAL: $var_name='$value' points to a root-ish path ($rf_value); refusing." >&2
     exit 2
   fi
 }
-for _v in SFT_HF_DIR SFT_MEGATRON_DIR REWARD_DIR BT_PRETRAIN_DIR; do
+for _v in SFT_HF_DIR SFT_MEGATRON_DIR REWARD_DIR BT_PRETRAIN_DIR EVAL_DIR EVAL_WINRATE_DIR ROLLOUT_DIR TENSORBOARD_ROOT; do
   _assert_not_protected "$_v"
 done
 unset _v
 
-echo "Pipeline config: DATA_MODE=$DATA_MODE START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS KEEP_ALL_ROUND_REWARD_SNAPSHOTS=$KEEP_ALL_ROUND_REWARD_SNAPSHOTS KEEP_FINAL_POLICY_PER_ROUND=$KEEP_FINAL_POLICY_PER_ROUND KEEP_FINAL_REWARD_PER_ROUND=$KEEP_FINAL_REWARD_PER_ROUND REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-<default>} SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE ACTOR_LR=$ACTOR_LR CRITIC_LR=$CRITIC_LR KL_LOSS_COEF=$KL_LOSS_COEF SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
+echo "Pipeline config: DATA_MODE=$DATA_MODE MODEL_ROOT=$MODEL_ROOT MODEL_SH=$MODEL_SH MODEL_NAME_FOR_EXPORT=${MODEL_NAME_FOR_EXPORT:-<default>} START_ROUND=$START_ROUND NUM_ROUNDS=$NUM_ROUNDS NUM_ROLLOUT_PER_ROUND=$NUM_ROLLOUT_PER_ROUND FROM_SCRATCH=$FROM_SCRATCH KEEP_ALL_ROUND_CHECKPOINTS=$KEEP_ALL_ROUND_CHECKPOINTS KEEP_ALL_ROUND_REWARD_SNAPSHOTS=$KEEP_ALL_ROUND_REWARD_SNAPSHOTS KEEP_FINAL_POLICY_PER_ROUND=$KEEP_FINAL_POLICY_PER_ROUND KEEP_FINAL_REWARD_PER_ROUND=$KEEP_FINAL_REWARD_PER_ROUND REWARD_MODEL_INIT=${REWARD_MODEL_INIT:-<default>} SFT_HF_DIR=$SFT_HF_DIR SFT_MEGATRON_DIR=$SFT_MEGATRON_DIR SFT_DATA_PATH=$SFT_DATA_PATH SFT_WARMUP_SAMPLES=$SFT_WARMUP_SAMPLES SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS EVAL_DIR=$EVAL_DIR ROLLOUT_DIR=$ROLLOUT_DIR TENSORBOARD_ROOT=$TENSORBOARD_ROOT EVAL_TEMPERATURE=$EVAL_TEMPERATURE BOOTSTRAP_NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT BOOTSTRAP_ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN ADVANTAGE_ESTIMATOR=$ADVANTAGE_ESTIMATOR N_SAMPLES_PER_PROMPT=$N_SAMPLES_PER_PROMPT NORMALIZE_ADVANTAGES=$NORMALIZE_ADVANTAGES PPO_START_FROM_SFT=$PPO_START_FROM_SFT PPO_REF_FIXED_TO_SFT=$PPO_REF_FIXED_TO_SFT GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE ACTOR_LR=$ACTOR_LR CRITIC_LR=$CRITIC_LR KL_LOSS_COEF=$KL_LOSS_COEF SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES REWARD_EVAL_SHUFFLE_SEED=$REWARD_EVAL_SHUFFLE_SEED REWARD_UPDATE_EPOCHS=$REWARD_UPDATE_EPOCHS REWARD_UPDATE_BATCH_SIZE=$REWARD_UPDATE_BATCH_SIZE REWARD_ONLINE_PREF_WEIGHT=$REWARD_ONLINE_PREF_WEIGHT MIN_FREE_DISK_GB_PPO=$MIN_FREE_DISK_GB_PPO MIN_FREE_DISK_GB_EXPORT=$MIN_FREE_DISK_GB_EXPORT REWARD_EXTERNAL_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH"
 
 write_codex_hard_rules() {
   mkdir -p "$(dirname "$CODEX_RULES_PATH")"
@@ -308,73 +315,34 @@ raise SystemExit(f"No JSONL rows found in {path}")
 PY
 }
 
-# ============ Critical: global path-safety assertions ============
-# Defend every downstream rm -rf against user env that aliases a destructive
-# variable to a protected base-model path. Learned from the 2026-04-30
-# incident where SFT_HF_DIR was aliased to BASE_HF_DIR by a faulty fallback
-# and reset_pipeline_state wiped the base model.
-#
-# Variables guarded: every user-overridable path that appears on the LHS of a
-# `rm -rf` anywhere in this script or its callees.
-_BASE_PATHS_PROTECTED=(
-  "$BASE_HF_DIR"
-  "$BASE_TORCH_DIST_DIR"
-  "$SLIME/models/qwen3-8B-base"
-  "$SLIME/models/qwen3-8b-base_torch_dist"
-  "$SLIME/models/qwen3-1.7B-base"
-)
-_assert_not_protected() {
-  local var_name=$1
-  local value=${!var_name}
-  [ -n "$value" ] || return 0
-  local rf_value
-  rf_value=$(readlink -f "$value" 2>/dev/null || echo "$value")
-  for protected in "${_BASE_PATHS_PROTECTED[@]}"; do
-    [ -n "$protected" ] || continue
-    local rf_protected
-    rf_protected=$(readlink -f "$protected" 2>/dev/null || echo "$protected")
-    if [ "$rf_value" = "$rf_protected" ]; then
-      echo "FATAL: $var_name='$value' aliases protected path '$protected'" >&2
-      echo "       Any rm -rf targeting this variable would destroy a model asset." >&2
-      echo "       Refusing to continue. Fix the env override and retry." >&2
-      exit 2
-    fi
-  done
-  if [ "$rf_value" = "/" ] || [ "$rf_value" = "$SLIME" ] || [ "$rf_value" = "$SLIME/models" ]; then
-    echo "FATAL: $var_name='$value' points to a root-ish path ($rf_value); refusing." >&2
-    exit 2
-  fi
-}
-
-for _v in SFT_HF_DIR SFT_MEGATRON_DIR REWARD_DIR BT_PRETRAIN_DIR; do
-  _assert_not_protected "$_v"
-done
-unset _v
-
 reset_pipeline_state() {
   echo "===== FROM_SCRATCH=1: removing derived pipeline artifacts ====="
-  rm -rf "$SFT_HF_DIR" "$SFT_MEGATRON_DIR" "$REWARD_DIR" "$SLIME/models/save_dir_bootstrap" "$SLIME/models/save_dir_bootstrap_critic"
-  rm -rf "$SLIME/models/reward_model_bt_pretrain"
+  if [ "$SFT_ENABLED" -eq 1 ]; then
+    rm -rf "$SFT_HF_DIR" "$SFT_MEGATRON_DIR"
+  else
+    echo "Preserving external SFT because SFT_ENABLED=$SFT_ENABLED: $SFT_HF_DIR / $SFT_MEGATRON_DIR"
+  fi
+  rm -rf "$REWARD_DIR" "$MODEL_ROOT/save_dir_bootstrap" "$MODEL_ROOT/save_dir_bootstrap_critic"
+  rm -rf "$MODEL_ROOT/reward_model_bt_pretrain"
   shopt -s nullglob
   for path in \
-    "$SLIME"/models/save_dir_r* \
-    "$SLIME"/models/critic_r* \
-    "$SLIME"/models/policy_r*_hf \
-    "$SLIME"/eval/outputs_policy_r*.jsonl \
-    "$SLIME"/eval/eval_math_round_*.json \
-    "$SLIME"/eval/winrate_r*.json \
-    "$SLIME"/eval/winrate_r*.log \
-    "$SLIME"/eval_winrate/winrate_r*.json \
-    "$SLIME"/eval_winrate/winrate_r*.log \
-    "$SLIME"/rollout/rollout_*.pt \
-    "$SLIME"/tensorboard_log/slime-irl \
-    "$SLIME"/tensorboard_log/slime-sft \
-    "$SLIME"/tensorboard_log/slime-reward; do
+    "$MODEL_ROOT"/save_dir_r* \
+    "$MODEL_ROOT"/critic_r* \
+    "$MODEL_ROOT"/policy_r*_hf \
+    "$EVAL_DIR"/outputs_policy_r*.jsonl \
+    "$EVAL_DIR"/winrate_r*.json \
+    "$EVAL_DIR"/winrate_r*.log \
+    "$EVAL_WINRATE_DIR"/winrate_r*.json \
+    "$EVAL_WINRATE_DIR"/winrate_r*.log \
+    "$ROLLOUT_DIR"/rollout_*.pt \
+    "$TENSORBOARD_ROOT"/slime-irl \
+    "$TENSORBOARD_ROOT"/slime-sft \
+    "$TENSORBOARD_ROOT"/slime-reward; do
     rm -rf "$path"
   done
   shopt -u nullglob
   rm -f "$SFT_BASELINE"
-  echo "Preserved: models/qwen3-*-base, models/qwen3-8b-base_torch_dist, ultrafeedback/"
+  echo "Preserved: base models, base torch_dist, ultrafeedback/"
 }
 
 if [ "$SFT_DATA_PATH" = "$SFT_SYNTH_FULL_DATA_PATH" ]; then
@@ -387,11 +355,11 @@ if [ "$FROM_SCRATCH" -eq 1 ]; then
 fi
 
 # Always nuke tensorboard_log at pipeline start so each run gets a clean TB tree.
-rm -rf "$SLIME/tensorboard_log" 2>/dev/null || true
+rm -rf "$TENSORBOARD_ROOT" 2>/dev/null || true
 
 check_disk_space() {
   local stage=$1
-  local path=${2:-$SLIME/models}
+  local path=${2:-$MODEL_ROOT}
   local min_free_gb=${3:-$MIN_FREE_DISK_GB}
   mkdir -p "$path"
   local avail_gb
@@ -443,41 +411,41 @@ fi
 
 # ============ Clean ALL artifacts ============
 # Always clean old 1.7B artifacts to save disk space
-rm -rf $SLIME/models/qwen3-1.7b-base_torch_dist
-rm -rf $SLIME/models/sft_checkpoint_hf  # old 1.7B SFT HF
+rm -rf $MODEL_ROOT/qwen3-1.7b-base_torch_dist
+rm -rf $MODEL_ROOT/sft_checkpoint_hf  # old 1.7B SFT HF
 
 if [ "$START_ROUND" -eq 1 ]; then
   if [ "$RESUME_PARTIAL_ROUND1" -eq 1 ]; then
     echo "Resume mode: preserving partial round-1 artifacts (reward_model, rollout, tensorboard_log, eval outputs, save_dir_r*)"
-    rm -rf $SLIME/models/policy_r*_hf
-    mkdir -p $SLIME/eval
+    rm -rf $MODEL_ROOT/policy_r*_hf
+    mkdir -p $EVAL_DIR
   else
     if [ "$SKIP_SFT" -ne 1 ]; then
       rm -rf $SFT_MEGATRON_DIR
       rm -rf $SFT_HF_DIR
     fi
     rm -rf $REWARD_DIR
-    rm -rf $SLIME/models/save_dir_r*
-    rm -rf $SLIME/models/critic_r*
-    rm -rf $SLIME/models/save_dir_bootstrap $SLIME/models/save_dir_bootstrap_critic
-    rm -rf $SLIME/models/policy_r*_hf
-    rm -rf $SLIME/rollout
-    rm -rf $SLIME/tensorboard_log
+    rm -rf $MODEL_ROOT/save_dir_r*
+    rm -rf $MODEL_ROOT/critic_r*
+    rm -rf $MODEL_ROOT/save_dir_bootstrap $MODEL_ROOT/save_dir_bootstrap_critic
+    rm -rf $MODEL_ROOT/policy_r*_hf
+    rm -rf $ROLLOUT_DIR
+    rm -rf $TENSORBOARD_ROOT
     # Clean per-round policy outputs but preserve SFT baseline
-    find $SLIME/eval -maxdepth 1 -name "outputs_policy_r*.jsonl" -delete 2>/dev/null || true
-    find $SLIME/eval -maxdepth 1 -name "eval_math_round_*.json" -delete 2>/dev/null || true
-    find $SLIME/eval -maxdepth 1 -name "winrate_r*.json" -delete 2>/dev/null || true
-    find $SLIME/eval -maxdepth 1 -name "winrate_r*.log" -delete 2>/dev/null || true
-    mkdir -p $SLIME/eval
+    find $EVAL_DIR -maxdepth 1 -name "outputs_policy_r*.jsonl" -delete 2>/dev/null || true
+    find $EVAL_DIR -maxdepth 1 -name "eval_math_round_*.json" -delete 2>/dev/null || true
+    find $EVAL_DIR -maxdepth 1 -name "winrate_r*.json" -delete 2>/dev/null || true
+    find $EVAL_DIR -maxdepth 1 -name "winrate_r*.log" -delete 2>/dev/null || true
+    mkdir -p $EVAL_DIR
   fi
 else
   echo "Resume mode: preserving reward_model, save_dir_r*, rollout, tensorboard_log, and eval outputs"
-  rm -rf $SLIME/models/policy_r*_hf
-  mkdir -p $SLIME/eval
+  rm -rf $MODEL_ROOT/policy_r*_hf
+  mkdir -p $EVAL_DIR
 fi
 
 # ============ Phase -1: Convert base model HF → torch_dist ============
-echo "===== Converting Qwen3-8B HF → torch_dist ====="
+echo "===== Converting base HF → torch_dist ====="
 if [ ! -d "$BASE_HF_DIR" ]; then
   echo "ERROR: missing base HF checkpoint at $BASE_HF_DIR" >&2
   exit 1
@@ -507,7 +475,7 @@ else
   mapfile -t SFT_KEYS < <(detect_sft_data_keys)
   SFT_INPUT_KEY=${SFT_KEYS[0]}
   SFT_LABEL_KEY=${SFT_KEYS[1]}
-  MODEL_SH=scripts/models/qwen3-8B.sh \
+  MODEL_SH=$MODEL_SH \
   HF_CKPT=$BASE_HF_DIR \
   ACTOR_CKPT=$BASE_TORCH_DIST_DIR \
   SAVE_DIR=$SFT_MEGATRON_DIR \
@@ -515,6 +483,7 @@ else
   SFT_INPUT_KEY=$SFT_INPUT_KEY \
   SFT_LABEL_KEY=$SFT_LABEL_KEY \
   SFT_NUM_EPOCHS=$SFT_NUM_EPOCHS \
+  TENSORBOARD_DIR=$TENSORBOARD_ROOT/slime-sft/${PIPELINE_RUN_TAG:-sft} \
   bash scripts/run-sft-prod.sh
 fi
 
@@ -530,6 +499,7 @@ else
   else echo "ERROR: common.pt not found"; exit 1; fi
 
   python3 tools/convert_torch_dist_to_hf.py \
+    ${MODEL_NAME_FOR_EXPORT:+--model-name $MODEL_NAME_FOR_EXPORT} \
     --input-dir $CKPT_DIR \
     --output-dir $SFT_HF_DIR \
     --origin-hf-dir $BASE_HF_DIR \
@@ -540,14 +510,19 @@ fi
 generate_with_sglang() {
   local MODEL_PATH=$1
   local OUTPUT=$2
-  local PORT=30010  # avoid conflict with PPO's SGLang port 15000
+  local PORT=${SGLANG_PORT:-30010}  # avoid conflict with PPO's SGLang port 15000
+  local -a sglang_extra_args=()
+  if [ -n "${SGLANG_EXTRA_ARGS:-}" ]; then
+    read -r -a sglang_extra_args <<< "$SGLANG_EXTRA_ARGS"
+  fi
   echo "Starting SGLang server on port $PORT for $MODEL_PATH"
-  CUDA_VISIBLE_DEVICES=0,1,2,3 python3 -m sglang.launch_server \
+  CUDA_VISIBLE_DEVICES=${SGLANG_CUDA_VISIBLE_DEVICES:-0,1,2,3} python3 -m sglang.launch_server \
     --model-path $MODEL_PATH \
     --port $PORT \
-    --tp 4 \
+    --tp ${SGLANG_TP:-4} \
     --host 127.0.0.1 \
-    --trust-remote-code &
+    --trust-remote-code \
+    "${sglang_extra_args[@]}" &
   SGLANG_PID=$!
   # Wait for server ready
   for i in $(seq 1 60); do
@@ -575,7 +550,7 @@ rollout_health_gate() {
   local stage=$1
   local rollout_end=$2
   local window=$3
-  python3 - "$stage" "$SLIME/rollout" "$rollout_end" "$window" "$ROLLOUT_HEALTH_MAX_TRUNCATED" <<'PY'
+  python3 - "$stage" "$ROLLOUT_DIR" "$rollout_end" "$window" "$ROLLOUT_HEALTH_MAX_TRUNCATED" <<'PY'
 from pathlib import Path
 import sys
 
@@ -682,7 +657,7 @@ run_blind_winrate_eval() {
   local output_json=$3
   local label=$4
   local min_winrate=$5
-  mkdir -p "$SLIME/eval_winrate"
+  mkdir -p "$EVAL_WINRATE_DIR"
   local run_eval=1
   if [ -f "$output_json" ] && [ "$output_json" -nt "$outputs_a" ] && [ "$output_json" -nt "$outputs_b" ]; then
     run_eval=0
@@ -729,7 +704,7 @@ round_smoke_gates() {
     if ! python3 scripts/math_accuracy_gate.py \
       --outputs "$round_output" \
       --eval-prompts "$TEST_DATA" \
-      --output "$SLIME/eval/eval_math_round_${round}.json" \
+      --output "$EVAL_DIR/eval_math_round_${round}.json" \
       --round "$round" \
       --num-workers 16; then
       echo "WARNING: round $round math accuracy gate failed (non-blocking)" >&2
@@ -743,17 +718,17 @@ round_smoke_gates() {
   run_blind_winrate_eval \
     "$round_output" \
     "$SFT_BASELINE" \
-    "$SLIME/eval_winrate/winrate_r${round}_vs_sft.json" \
+    "$EVAL_WINRATE_DIR/winrate_r${round}_vs_sft.json" \
     "Round $round blind winrate vs SFT" \
     "$WINRATE_GATE_MIN"
 
   if [ "$round" -ge 2 ]; then
-    local prev_round_output=$SLIME/eval/outputs_policy_r$((round - 1)).jsonl
+    local prev_round_output=$EVAL_DIR/outputs_policy_r$((round - 1)).jsonl
     if [ -f "$prev_round_output" ]; then
       run_blind_winrate_eval \
         "$round_output" \
         "$prev_round_output" \
-        "$SLIME/eval_winrate/winrate_r${round}_vs_r$((round - 1)).json" \
+        "$EVAL_WINRATE_DIR/winrate_r${round}_vs_r$((round - 1)).json" \
         "Round $round blind winrate vs Round $((round - 1))" \
         "$INTERROUND_WINRATE_GATE_MIN"
     fi
@@ -762,14 +737,12 @@ round_smoke_gates() {
 
 round_train_complete() {
   local round=$1
-  local round_save_dir=$SLIME/models/save_dir_r${round}
+  local round_save_dir=$MODEL_ROOT/save_dir_r${round}
   local round_reward_eval=$REWARD_DIR/reward_eval_round_${round}.json
   local round_reward_snapshot
   round_reward_snapshot=$(round_reward_model_snapshot "$round")
-  # Note: reward_eval_round_${N}.json is written by update_reward_accel.py
-  # unconditionally (holdout eval), so we always require it — emptying
-  # REWARD_EXTERNAL_EVAL_PATH only disables the *external* eval, not the inline
-  # holdout report.
+  # reward_eval_round_${N}.json is the inline holdout report. Emptying
+  # REWARD_EXTERNAL_EVAL_PATH only disables the separate external eval.
   [ -f "$round_save_dir/latest_checkpointed_iteration.txt" ] && \
     [ -f "$round_reward_eval" ] && \
     [ -f "$round_reward_snapshot/config.json" ] && \
@@ -783,7 +756,7 @@ round_export_complete() {
 
 round_output_complete() {
   local round=$1
-  local round_output=$SLIME/eval/outputs_policy_r${round}.jsonl
+  local round_output=$EVAL_DIR/outputs_policy_r${round}.jsonl
   [ -f "$round_output" ] && [ "$(awk 'END {print NR}' "$round_output")" -ge "$EXPECTED_EVAL_LINES" ]
 }
 
@@ -925,8 +898,8 @@ prune_stale_checkpoints() {
   fi
 
   if [ "$KEEP_ALL_ROUND_CHECKPOINTS" -ne 1 ] && [ "$KEEP_FINAL_POLICY_PER_ROUND" -ne 1 ]; then
-    local keep_dir=$SLIME/models/save_dir_r${current_round}
-    for save_dir in "$SLIME"/models/save_dir_r*; do
+    local keep_dir=$MODEL_ROOT/save_dir_r${current_round}
+    for save_dir in "$MODEL_ROOT"/save_dir_r*; do
       if [ ! -d "$save_dir" ]; then
         continue
       fi
@@ -939,8 +912,8 @@ prune_stale_checkpoints() {
   fi
 
   if [ "$KEEP_ALL_ROUND_CHECKPOINTS" -ne 1 ]; then
-    local keep_critic_dir=$SLIME/models/critic_r${current_round}
-    for critic_dir in "$SLIME"/models/critic_r*; do
+    local keep_critic_dir=$MODEL_ROOT/critic_r${current_round}
+    for critic_dir in "$MODEL_ROOT"/critic_r*; do
       if [ ! -d "$critic_dir" ]; then
         continue
       fi
@@ -971,12 +944,6 @@ prune_stale_checkpoints() {
   # Do not prune it here; only delete at the very end of the pipeline if desired.
 }
 
-# One-shot eager prune at pipeline startup: if rolling retention is active,
-# drop every reward step_round* except the one with the highest numeric round
-# suffix. Protects against the case where a prior pipeline ran with
-# KEEP_FINAL_REWARD_PER_ROUND=1 and left many 15GB snapshots on disk, which
-# would otherwise block the pre-PPO disk check of the resumed run.
-# Never touches $REWARD_DIR/latest (that is the PPO consumer).
 startup_prune_legacy_reward_snapshots() {
   if [ "$KEEP_ALL_ROUND_REWARD_SNAPSHOTS" -eq 1 ] || [ "$KEEP_FINAL_REWARD_PER_ROUND" -eq 1 ]; then
     return 0
@@ -1030,14 +997,14 @@ startup_prune_legacy_reward_snapshots() {
 }
 
 cleanup_transient_training_artifacts() {
-  local bootstrap_dir=$SLIME/models/save_dir_bootstrap
+  local bootstrap_dir=$MODEL_ROOT/save_dir_bootstrap
 
   if [ -d "$bootstrap_dir" ]; then
     echo "Removing transient bootstrap checkpoint $bootstrap_dir"
     rm -rf "$bootstrap_dir"
   fi
 
-  for critic_dir in "$SLIME"/models/critic_r*; do
+  for critic_dir in "$MODEL_ROOT"/critic_r*; do
     if [ ! -d "$critic_dir" ]; then
       continue
     fi
@@ -1045,7 +1012,7 @@ cleanup_transient_training_artifacts() {
     rm -rf "$critic_dir"
   done
 
-  for policy_hf_dir in "$SLIME"/models/policy_r*_hf; do
+  for policy_hf_dir in "$MODEL_ROOT"/policy_r*_hf; do
     if [ ! -d "$policy_hf_dir" ]; then
       continue
     fi
@@ -1056,7 +1023,7 @@ cleanup_transient_training_artifacts() {
 
 # ============ Generate SFT baseline outputs (for offline winrate comparison) ============
 echo "===== Generating SFT baseline outputs ====="
-mkdir -p $SLIME/eval
+mkdir -p $EVAL_DIR
 if [ "$SKIP_SFT_BASELINE" -eq 1 ]; then
   echo "Skipping SFT baseline generation: found $SFT_BASELINE"
 else
@@ -1088,7 +1055,7 @@ else
   sleep 3
 
   REWARD_BT_BASE_MODEL=$BT_PRETRAIN_BASE_MODEL \
-  REWARD_BT_ROOT=$SLIME/models/reward_model_bt_pretrain \
+  REWARD_BT_ROOT=$MODEL_ROOT/reward_model_bt_pretrain \
   REWARD_BT_OUTPUT_DIR=$BT_PRETRAIN_DIR \
   REWARD_BT_PREF_PATH=$REWARD_BT_WARMUP_DATA_PATH \
   REWARD_BT_EVAL_PATH=$REWARD_BT_EVAL_PATH \
@@ -1147,39 +1114,43 @@ startup_prune_legacy_reward_snapshots
 
 # Round 0: Bootstrap rollout — collect SFT-aligned rollouts so R1 can train RM
 echo "===== Round 0: Bootstrap rollout (SFT-aligned rollouts for R1 reward update) ====="
-BOOTSTRAP_SAVE_DIR=$SLIME/models/save_dir_bootstrap
-if [ ! -d "$SLIME/rollout" ] || [ "$(ls $SLIME/rollout/rollout_*.pt 2>/dev/null | wc -l)" -lt "$BOOTSTRAP_NUM_ROLLOUT" ]; then
+BOOTSTRAP_SAVE_DIR=$MODEL_ROOT/save_dir_bootstrap
+if [ ! -d "$ROLLOUT_DIR" ] || [ "$(ls $ROLLOUT_DIR/rollout_*.pt 2>/dev/null | wc -l)" -lt "$BOOTSTRAP_NUM_ROLLOUT" ]; then
   rm -rf $BOOTSTRAP_SAVE_DIR 2>/dev/null || true
 
-  MODEL_SH=scripts/models/qwen3-8B.sh \
-  HF_CKPT=$SFT_HF_DIR \
-  REF_CKPT=$SFT_MEGATRON_DIR \
-  SAVE_DIR=$BOOTSTRAP_SAVE_DIR \
-  PROMPT_DATA=$PROMPT_DATA \
-  DEMO_DATA=$DEMO_DATA \
-  PROMPT_INPUT_KEY=text \
-  PROMPT_LABEL_KEY=$PROMPT_LABEL_KEY_PASS \
-  NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT \
-  ALIGN_ROLLOUT_WITH_SFT=1 \
-  DEBUG_ROLLOUT_ONLY=1 \
-  REWARD_MODEL_DIR=$REWARD_DIR \
-  REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
-  ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE \
-  ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
-  GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE \
-  ACTOR_LR=$ACTOR_LR \
-  CRITIC_LR=$CRITIC_LR \
-  KL_LOSS_COEF=$KL_LOSS_COEF \
-  SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY \
-  SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC \
-  SLIME_RUBRIC_ENABLED=$SLIME_RUBRIC_ENABLED \
-  SLIME_RUBRIC_W_IRL=$SLIME_RUBRIC_W_IRL \
-  SLIME_RUBRIC_W_FORMAT=$SLIME_RUBRIC_W_FORMAT \
-  SLIME_RUBRIC_W_ANSWER=$SLIME_RUBRIC_W_ANSWER \
-  N_SAMPLES_PER_PROMPT=1 \
-  NORMALIZE_ADVANTAGES=$NORMALIZE_ADVANTAGES \
-  TB_EXP_NAME=bootstrap \
-  bash scripts/run-irl-prod.sh
+	  MODEL_SH=$MODEL_SH \
+	  HF_CKPT=$SFT_HF_DIR \
+	  REF_CKPT=$SFT_MEGATRON_DIR \
+	  SAVE_DIR=$BOOTSTRAP_SAVE_DIR \
+	  PROMPT_DATA=$PROMPT_DATA \
+	  DEMO_DATA=$DEMO_DATA \
+	  PROMPT_INPUT_KEY=text \
+	  PROMPT_LABEL_KEY=$PROMPT_LABEL_KEY_PASS \
+	  NUM_ROLLOUT=$BOOTSTRAP_NUM_ROLLOUT \
+	  N_SAMPLES_PER_PROMPT=$N_SAMPLES_PER_PROMPT \
+	  ADVANTAGE_ESTIMATOR=$ADVANTAGE_ESTIMATOR \
+	  NORMALIZE_ADVANTAGES=$NORMALIZE_ADVANTAGES \
+	  ALIGN_ROLLOUT_WITH_SFT=1 \
+	  DEBUG_ROLLOUT_ONLY=1 \
+	  REWARD_MODEL_DIR=$REWARD_DIR \
+	  REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
+	  ROLLOUT_DEBUG_DIR=$ROLLOUT_DIR \
+	  ROLLOUT_TEMPERATURE=$BOOTSTRAP_ROLLOUT_TEMPERATURE \
+	  ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
+	  GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE \
+	  ACTOR_LR=$ACTOR_LR \
+	  CRITIC_LR=$CRITIC_LR \
+	  KL_LOSS_COEF=$KL_LOSS_COEF \
+	  SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY \
+	  SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC \
+	  SLIME_RUBRIC_ENABLED=$SLIME_RUBRIC_ENABLED \
+	  SLIME_RUBRIC_PLUGINS=$SLIME_RUBRIC_PLUGINS \
+	  SLIME_RUBRIC_W_IRL=$SLIME_RUBRIC_W_IRL \
+	  SLIME_RUBRIC_W_FORMAT=$SLIME_RUBRIC_W_FORMAT \
+	  SLIME_RUBRIC_W_ANSWER=$SLIME_RUBRIC_W_ANSWER \
+	  TENSORBOARD_DIR=$TENSORBOARD_ROOT/slime-irl/bootstrap \
+	  TB_EXP_NAME=bootstrap \
+	  bash scripts/run-irl-prod.sh
 
   echo "===== Killing bootstrap processes ====="
   pkill -9 sglang || true
@@ -1198,7 +1169,7 @@ rollout_health_gate "bootstrap" $(( BOOTSTRAP_NUM_ROLLOUT - 1 )) "$BOOTSTRAP_NUM
 # ============ Rounds 1-7 ============
 PREV_SAVE_DIR=""
 if [ "$START_ROUND" -gt 1 ]; then
-  PREV_SAVE_DIR=$SLIME/models/save_dir_r$((START_ROUND - 1))
+  PREV_SAVE_DIR=$MODEL_ROOT/save_dir_r$((START_ROUND - 1))
   if [ ! -d "$PREV_SAVE_DIR" ]; then
     echo "ERROR: START_ROUND=$START_ROUND requires previous checkpoint at $PREV_SAVE_DIR"
     exit 1
@@ -1206,9 +1177,9 @@ if [ "$START_ROUND" -gt 1 ]; then
   echo "Resuming from round $START_ROUND with PREV_SAVE_DIR=$PREV_SAVE_DIR"
 fi
 for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
-  ROUND_POLICY_HF=$SLIME/models/policy_r${ROUND}_hf
-  ROUND_OUTPUT=$SLIME/eval/outputs_policy_r${ROUND}.jsonl
-  ROUND_SAVE_DIR=$SLIME/models/save_dir_r${ROUND}
+  ROUND_POLICY_HF=$MODEL_ROOT/policy_r${ROUND}_hf
+  ROUND_OUTPUT=$EVAL_DIR/outputs_policy_r${ROUND}.jsonl
+  ROUND_SAVE_DIR=$MODEL_ROOT/save_dir_r${ROUND}
   ROUND_REWARD_EVAL=$REWARD_DIR/reward_eval_round_${ROUND}.json
   ROUND_TRAIN_READY=0
   ROUND_EXPORT_READY=0
@@ -1222,8 +1193,8 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     echo "Skipping Round $ROUND training: found checkpoint + reward eval artifacts"
     if ! round_output_complete "$ROUND"; then
       echo "Round $ROUND test-set output missing; exporting now"
-      check_disk_space "round${ROUND}-pre-export" "$SLIME/models" "$MIN_FREE_DISK_GB_EXPORT"
-      TEST_DATA=$TEST_DATA EXPECTED_EVAL_LINES=$EXPECTED_EVAL_LINES EVAL_TEMPERATURE=$EVAL_TEMPERATURE KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
+      check_disk_space "round${ROUND}-pre-export" "$MODEL_ROOT" "$MIN_FREE_DISK_GB_EXPORT"
+      EVAL_TEMPERATURE=$EVAL_TEMPERATURE KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
     fi
     if ! round_output_complete "$ROUND"; then
       echo "ERROR: round $ROUND output generation failed or is incomplete: $ROUND_OUTPUT"
@@ -1260,9 +1231,10 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     ROUND_ID=$ROUND \
     ROLLOUT_END=$RU_ROLLOUT_END \
     NUM_ROLLOUT_PER_ROUND=$RU_NUM_ROLLOUT \
-    REWARD_DIR=$REWARD_DIR \
-    REWARD_TRAIN_DATA_PATH=$REWARD_TRAIN_DATA_PATH \
-    REWARD_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH \
+	    REWARD_DIR=$REWARD_DIR \
+	    ROLLOUT_DIR=$ROLLOUT_DIR \
+	    REWARD_TRAIN_DATA_PATH=$REWARD_TRAIN_DATA_PATH \
+	    REWARD_EVAL_PATH=$REWARD_EXTERNAL_EVAL_PATH \
     REWARD_EVAL_REJECTED_KEY=$REWARD_EVAL_REJECTED_KEY_PASS \
     REWARD_EVAL_TARGET_PATH= \
     REWARD_EVAL_MAX_SAMPLES=$REWARD_EVAL_MAX_SAMPLES \
@@ -1283,7 +1255,7 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   sleep 5
 
   echo "===== Round $ROUND/$NUM_ROUNDS: PPO ====="
-  check_disk_space "round${ROUND}-pre-ppo" "$SLIME/models" "$MIN_FREE_DISK_GB_PPO"
+  check_disk_space "round${ROUND}-pre-ppo" "$MODEL_ROOT" "$MIN_FREE_DISK_GB_PPO"
 
   if [ "$PPO_REF_FIXED_TO_SFT" -eq 1 ]; then
     ROUND_REF_CKPT=$SFT_MEGATRON_DIR
@@ -1304,49 +1276,53 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
     ROUND_ACTOR_LOAD=$PREV_SAVE_DIR
   fi
 
-  ROUND_CRITIC_SAVE=$SLIME/models/critic_r${ROUND}
+  ROUND_CRITIC_SAVE=$MODEL_ROOT/critic_r${ROUND}
   ROUND_CRITIC_LOAD=""
   rm -rf "$ROUND_SAVE_DIR" "$ROUND_CRITIC_SAVE" 2>/dev/null || true
   # Critic cold start every round: prevent value function from tracking reward
   # too quickly and collapsing advantages to zero (which kills PPO gradient signal).
   # if [ "$ROUND" -gt 1 ]; then
-  #   PREV_CRITIC=$SLIME/models/critic_r$((ROUND - 1))
+  #   PREV_CRITIC=$MODEL_ROOT/critic_r$((ROUND - 1))
   #   if [ -d "$PREV_CRITIC" ] && [ -f "$PREV_CRITIC/latest_checkpointed_iteration.txt" ]; then
   #     ROUND_CRITIC_LOAD=$PREV_CRITIC
   #   fi
   # fi
 
-  MODEL_SH=scripts/models/qwen3-8B.sh \
+  MODEL_SH=$MODEL_SH \
   HF_CKPT=$SFT_HF_DIR \
   REF_CKPT=$ROUND_REF_CKPT \
   SAVE_DIR=$ROUND_SAVE_DIR \
   ACTOR_LOAD=$ROUND_ACTOR_LOAD \
-  CRITIC_SAVE_DIR=$ROUND_CRITIC_SAVE \
-  CRITIC_LOAD_DIR=$ROUND_CRITIC_LOAD \
-  PROMPT_DATA=$PROMPT_DATA \
-  DEMO_DATA=$DEMO_DATA \
-  PROMPT_INPUT_KEY=text \
-  PROMPT_LABEL_KEY=$PROMPT_LABEL_KEY_PASS \
-  NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND \
-  ALIGN_ROLLOUT_WITH_SFT=1 \
-  REWARD_MODEL_DIR=$REWARD_DIR \
-  REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
-  ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE \
-  ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
-  GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE \
+	  CRITIC_SAVE_DIR=$ROUND_CRITIC_SAVE \
+	  CRITIC_LOAD_DIR=$ROUND_CRITIC_LOAD \
+	  PROMPT_DATA=$PROMPT_DATA \
+	  DEMO_DATA=$DEMO_DATA \
+	  PROMPT_INPUT_KEY=text \
+	  PROMPT_LABEL_KEY=$PROMPT_LABEL_KEY_PASS \
+	  NUM_ROLLOUT=$NUM_ROLLOUT_PER_ROUND \
+	  N_SAMPLES_PER_PROMPT=$N_SAMPLES_PER_PROMPT \
+	  ADVANTAGE_ESTIMATOR=$ADVANTAGE_ESTIMATOR \
+	  NORMALIZE_ADVANTAGES=$NORMALIZE_ADVANTAGES \
+	  ALIGN_ROLLOUT_WITH_SFT=1 \
+	  REWARD_MODEL_DIR=$REWARD_DIR \
+	  REWARD_MODEL_INIT=$REWARD_MODEL_INIT \
+	  ROLLOUT_DEBUG_DIR=$ROLLOUT_DIR \
+	  ROLLOUT_TEMPERATURE=$ROLLOUT_TEMPERATURE \
+	  ROLLOUT_MAX_RESPONSE_LEN=$ROLLOUT_MAX_RESPONSE_LEN \
+	  GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE \
   ACTOR_LR=$ACTOR_LR \
   CRITIC_LR=$CRITIC_LR \
-  KL_LOSS_COEF=$KL_LOSS_COEF \
-  SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY \
-  SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC \
-  SLIME_RUBRIC_ENABLED=$SLIME_RUBRIC_ENABLED \
-  SLIME_RUBRIC_W_IRL=$SLIME_RUBRIC_W_IRL \
-  SLIME_RUBRIC_W_FORMAT=$SLIME_RUBRIC_W_FORMAT \
-  SLIME_RUBRIC_W_ANSWER=$SLIME_RUBRIC_W_ANSWER \
-  N_SAMPLES_PER_PROMPT=$N_SAMPLES_PER_PROMPT \
-  NORMALIZE_ADVANTAGES=$NORMALIZE_ADVANTAGES \
-  TB_EXP_NAME=round${ROUND} \
-  bash scripts/run-irl-prod.sh
+	  KL_LOSS_COEF=$KL_LOSS_COEF \
+	  SLIME_CUSTOM_RM_TRUNCATION_PENALTY=$SLIME_CUSTOM_RM_TRUNCATION_PENALTY \
+	  SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC=$SLIME_CUSTOM_RM_TRUNCATION_THRESHOLD_FRAC \
+	  SLIME_RUBRIC_ENABLED=$SLIME_RUBRIC_ENABLED \
+	  SLIME_RUBRIC_PLUGINS=$SLIME_RUBRIC_PLUGINS \
+	  SLIME_RUBRIC_W_IRL=$SLIME_RUBRIC_W_IRL \
+	  SLIME_RUBRIC_W_FORMAT=$SLIME_RUBRIC_W_FORMAT \
+	  SLIME_RUBRIC_W_ANSWER=$SLIME_RUBRIC_W_ANSWER \
+	  TENSORBOARD_DIR=$TENSORBOARD_ROOT/slime-irl/round${ROUND} \
+	  TB_EXP_NAME=round${ROUND} \
+	  bash scripts/run-irl-prod.sh
 
   rollout_health_gate "round${ROUND}" $(( NUM_ROLLOUT_PER_ROUND - 1 )) "$NUM_ROLLOUT_PER_ROUND"
 
@@ -1357,9 +1333,9 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
   pkill -9 python || true
   sleep 5
 
-  check_disk_space "round${ROUND}-pre-export" "$SLIME/models" "$MIN_FREE_DISK_GB_EXPORT"
+  check_disk_space "round${ROUND}-pre-export" "$MODEL_ROOT" "$MIN_FREE_DISK_GB_EXPORT"
   echo "===== Round $ROUND: Exporting test-set outputs ====="
-  TEST_DATA=$TEST_DATA EXPECTED_EVAL_LINES=$EXPECTED_EVAL_LINES EVAL_TEMPERATURE=$EVAL_TEMPERATURE KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
+  EVAL_TEMPERATURE=$EVAL_TEMPERATURE KEEP_POLICY_HF=0 bash scripts/export-policy-round.sh "$ROUND"
   if ! round_output_complete "$ROUND"; then
     echo "ERROR: round $ROUND output generation failed or is incomplete: $ROUND_OUTPUT"
     exit 1
@@ -1380,7 +1356,7 @@ for ROUND in $(seq "$START_ROUND" $NUM_ROUNDS); do
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from pathlib import Path
 
-base_dir = Path('/mnt/shared-storage-gpfs2/wangqianyi2/slime/tensorboard_log/slime-irl/round${ROUND}')
+base_dir = Path('${TENSORBOARD_ROOT}/slime-irl/round${ROUND}')
 run_dirs = [base_dir / 'actor', base_dir / 'critic', base_dir / 'rollout', base_dir / 'reward', base_dir]
 
 def load_series(tag):
@@ -1457,15 +1433,11 @@ cleanup_transient_training_artifacts
 
 echo "===== All $NUM_ROUNDS rounds completed ====="
 echo "Eval outputs:"
-ls -la $SLIME/eval/outputs_*.jsonl
+ls -la $EVAL_DIR/outputs_*.jsonl
 echo "External reward eval outputs:"
 ls -la $REWARD_DIR/reward_eval_external_round_*.json
 echo "Per-round test-set outputs are generated automatically under eval/."
-echo "Per-round final policy checkpoints are retained under $SLIME/models/save_dir_r*."
-if [ "$KEEP_ALL_ROUND_REWARD_SNAPSHOTS" -eq 1 ] || [ "$KEEP_FINAL_REWARD_PER_ROUND" -eq 1 ]; then
-  echo "Per-round final reward snapshots are retained under $REWARD_DIR/step_round*."
-else
-  echo "Reward snapshots use rolling retention: only $REWARD_DIR/latest/ and step_round${NUM_ROUNDS}/ are kept."
-fi
+echo "Per-round final policy checkpoints are retained under $MODEL_ROOT/save_dir_r*."
+echo "Per-round final reward snapshots are retained under $REWARD_DIR/step_round*."
 echo "Transient critic checkpoints and temporary HF exports are removed automatically."
 echo "Run scripts/run-winrate-offline.sh on a networked machine to compute winrate."
